@@ -1,0 +1,9 @@
+[package]
+name = "vulkan-training"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ash = { path = "../ash/ash", default-features = false, features = ["linked", "debug"] }
+ash-window = { path = "../ash/ash-window" }
+winit = "0.26.1"
