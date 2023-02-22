@@ -1,7 +1,7 @@
-use std::time::Duration;
-use gamedata::vector::Vec3;
-use octree::octree::Octree;
 use super::{System, TimeBasedSystem};
+use gamedata::vector::Vec3;
+use std::time::Duration;
+use world::World;
 
 #[derive(Default, Debug)]
 pub struct EntityPhysics {
@@ -16,16 +16,16 @@ pub struct EntityPhysics {
 
 pub struct PhysicsSystem {
     pub entities: Vec<EntityPhysics>,
-    pub gravity_acceleration: f64,
-    pub octree: Octree,
+    pub gravity_acceleration: f32,
+    pub world: World,
 }
 
 impl PhysicsSystem {
-    pub fn new_earth_like(size: f32) -> Self {
+    pub fn new_earth_like() -> Self {
         PhysicsSystem {
             entities: Vec::new(),
             gravity_acceleration: -9.81,
-            octree: Octree::new(size),
+            world: World::new(),
         }
     }
 }
@@ -45,7 +45,7 @@ impl System<EntityPhysics> for PhysicsSystem {
         self.entities.remove(index);
     }
 
-    fn act(&mut self, delta_time: f64) -> bool {
+    fn act(&mut self, delta_time: f32) -> bool {
         let mut result = false;
         for entity in &mut self.entities {
             if entity.affected_by_gravity {
@@ -58,14 +58,16 @@ impl System<EntityPhysics> for PhysicsSystem {
             let step = &entity.velocity * delta_time;
             entity.position += &step;
 
-            if self.octree.intersects_box(&entity.position, &entity.half_size) {
+            if
+            // self
+            //     .octree
+            //     .intersects_box(&entity.position, &entity.half_size)
+            false {
                 entity.position -= &step;
                 entity.affected_by_gravity = false;
             } else {
                 result = true;
             }
-
-            // println!("  - Movement: {:?}", entity.position);
         }
 
         result
@@ -83,13 +85,17 @@ impl TimeBasedSystem<EntityPhysics> for PhysicsSystem {
                 entity.acceleration.y = self.gravity_acceleration;
             }
 
-            let delta_velocity = &entity.acceleration * delta_time.as_secs_f64();
+            let delta_velocity = &entity.acceleration * delta_time.as_secs_f32();
             entity.velocity += &delta_velocity;
 
-            let step = &entity.velocity * delta_time.as_secs_f64();
+            let step = &entity.velocity * delta_time.as_secs_f32();
             entity.position += &step;
 
-            if self.octree.intersects_box(&entity.position, &entity.half_size) {
+            if
+            // self
+            //     .octree
+            //     .intersects_box(&entity.position, &entity.half_size)
+            false {
                 entity.position -= &step;
                 entity.affected_by_gravity = false;
             }

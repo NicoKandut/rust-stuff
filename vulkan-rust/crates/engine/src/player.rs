@@ -1,6 +1,5 @@
-use crate::systems::{physics::EntityPhysics, health::EntityHealth};
+use crate::systems::{health::EntityHealth, physics::EntityPhysics};
 use gamedata::vector::Vec3;
-
 
 pub struct Player {
     pub id: u64,

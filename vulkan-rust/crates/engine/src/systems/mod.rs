@@ -9,7 +9,7 @@ use self::physics::EntityPhysics;
 pub trait System<T> {
     fn add(&mut self, entity: T);
     fn remove(&mut self, id: u64);
-    fn act(&mut self, delta_time: f64) -> bool;
+    fn act(&mut self, delta_time: f32) -> bool;
 }
 
 #[derive(Default, Debug)]

@@ -1,7 +1,4 @@
-#![allow(dead_code)]
-#![allow(unused_variables)]
-
-use std::simd::usizex8;
+#![allow(unused)]
 
 use gamedata::{material::Material, vector::Vec3};
 
@@ -10,7 +7,6 @@ use crate::vec;
 pub type Size = f32;
 pub type Point = [f32; 3];
 pub type NodeId = usize;
-pub type Children = [Node; 8];
 
 // fn vec_div_scalar(v: Point, s: Size) -> Point {
 //     [v[0] / s, v[1] / s, v[2] / s]
@@ -45,12 +41,18 @@ pub struct Octree {
     arena: Vec<Node>,
 }
 
+#[derive(Debug, PartialEq)]
+pub enum Children {
+    Nodes([NodeId; 8]),
+    Chunk([Material; 64]),
+}
+
 #[derive(Debug)]
 pub struct Node {
     pub data: Material,
     pub center: Point,
     pub half_size: Size,
-    children: Option<[NodeId; 8]>,
+    children: Children,
     parent: Option<NodeId>,
 }
 
@@ -60,10 +62,16 @@ impl Node {
             data: Material::Air,
             center,
             half_size,
-            children: None,
+            children: Children::Chunk([Material::Air; 64]),
             parent: None,
         }
     }
+}
+
+#[cfg(test)]
+mod node_test {
+    #[test]
+    fn size_is_correct() {}
 }
 
 impl Octree {
@@ -72,7 +80,7 @@ impl Octree {
             data: Material::Air,
             center: [0., 0., 0.],
             half_size: size / 2.0,
-            children: None,
+            children: Children::Chunk([Material::Air; 64]),
             parent: None,
         }];
 
@@ -93,13 +101,22 @@ impl Octree {
         Ok(next_id)
     }
 
-    fn update_node(&mut self, node_id: NodeId, next_id: usize) -> Result<Children, ()> {
+    fn update_node(&mut self, node_id: NodeId, next_id: usize) -> Result<[Node; 8], ()> {
         if let Some(node) = self.arena.get_mut(node_id) {
-            let base_id = usizex8::splat(next_id);
-            let offset = usizex8::from_array([0, 1, 2, 3, 4, 5, 6, 7]);
-            let ids = base_id + offset;
+            let base_id = next_id;
 
-            node.children = Some(ids.into());
+            let ids = [
+                base_id + 0,
+                base_id + 1,
+                base_id + 2,
+                base_id + 3,
+                base_id + 4,
+                base_id + 5,
+                base_id + 6,
+                base_id + 7,
+            ];
+
+            node.children = Children::Nodes(ids);
 
             let children = create_children(node, node_id);
 
@@ -129,10 +146,9 @@ impl Octree {
                     half_size: node.half_size,
                 });
 
-                if let Some(children) = node.children {
-                    node_id = children[0]
-                } else {
-                    break;
+                match node.children {
+                    Children::Nodes(node_ids) => node_id = node_ids[0],
+                    _ => break,
                 }
             }
         }
@@ -143,13 +159,28 @@ impl Octree {
     pub fn set_at(&mut self, target: Point, mat: Material) {
         self.arena
             .iter_mut()
-            .find(|n| (n.children == None && intersect_point(n, &target)))
+            .find(|n| {
+                if let Children::Chunk(_) = n.children {
+                    intersect_point(n, &target)
+                } else {
+                    false
+                }
+            })
             .expect("No node at position")
             .data = mat;
     }
 
     pub fn get_leaves(&self) -> Vec<&Node> {
-        self.arena.iter().filter(|n| n.children == None).collect()
+        self.arena
+            .iter()
+            .filter(|n| {
+                if let Children::Chunk(_) = n.children {
+                    true
+                } else {
+                    false
+                }
+            })
+            .collect()
     }
 
     pub fn intersects_box(&self, center: &Vec3, half_size: &Vec3) -> bool {
@@ -230,7 +261,7 @@ impl Node {
             data,
             center,
             half_size,
-            children: None,
+            children: Children::Chunk([data; 64]),
             parent,
         }
     }

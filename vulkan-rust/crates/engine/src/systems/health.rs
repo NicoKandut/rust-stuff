@@ -5,17 +5,15 @@ use super::{System, TimeBasedSystem};
 #[derive(Default, Debug)]
 pub struct EntityHealth {
     pub id: u64,
-    pub max: f64,
-    pub current: f64,
-    pub regeneration: f64,
+    pub max: f32,
+    pub current: f32,
+    pub regeneration: f32,
 }
 
 #[derive(Default)]
 pub struct HealthSystem {
     pub entities: Vec<EntityHealth>,
 }
-
-
 
 impl System<EntityHealth> for HealthSystem {
     fn add(&mut self, entity: EntityHealth) {
@@ -32,7 +30,7 @@ impl System<EntityHealth> for HealthSystem {
         self.entities.remove(index);
     }
 
-    fn act(&mut self, delta_time: f64) -> bool {
+    fn act(&mut self, delta_time: f32) -> bool {
         let mut result = false;
 
         for entity in &mut self.entities {
@@ -43,8 +41,6 @@ impl System<EntityHealth> for HealthSystem {
 
                 result = true;
             }
-
-            // println!("  - Health: {:?}", entity.current);
         }
 
         result
@@ -61,7 +57,7 @@ impl TimeBasedSystem<EntityHealth> for HealthSystem {
             if entity.current < entity.max {
                 entity.current = entity
                     .max
-                    .min(entity.current + entity.regeneration * delta_time.as_secs_f64());
+                    .min(entity.current + entity.regeneration * delta_time.as_secs_f32());
             }
         }
     }

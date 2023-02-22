@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 pub mod device;
 mod gamestate;
 pub mod graphics;
@@ -11,22 +13,29 @@ use crate::device::swapchainsupport::SwapchainSupport;
 use crate::graphics::Vertex;
 use anyhow::{anyhow, Result};
 use gamedata::material::Material;
+use gamedata::vector::Vec3;
 use gamestate::GameState;
 use log::*;
-use noise::{NoiseFn, Perlin};
-use octree::octree::Node;
 use player::Player;
-use std::collections::HashSet;
 use std::ffi::CStr;
 use std::os::raw::c_void;
 use std::usize;
+use std::{collections::HashSet, f32::consts::PI};
+use world::fixed_tree::ChunkData;
+use world::{
+    chunk_manager::{ChunkId, WorldPosition},
+    World, CHUNK_SIZE,
+};
+// use tobj::Model;
 use vulkanalia::loader::{LibloadingLoader, LIBRARY};
 use vulkanalia::prelude::v1_0::*;
 use vulkanalia::vk::ExtDebugUtilsExtension;
 use vulkanalia::vk::KhrSurfaceExtension;
 use vulkanalia::window as vk_window;
-use winit::dpi::LogicalSize;
-use winit::event::{Event, WindowEvent};
+use winit::dpi::{LogicalSize, PhysicalPosition};
+use winit::event::{
+    DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent,
+};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Window, WindowBuilder};
 // use winit::platform::windows::WindowExtWindows;
@@ -45,8 +54,31 @@ pub const DEVICE_EXTENSIONS: &[vk::ExtensionName] = &[vk::KHR_SWAPCHAIN_EXTENSIO
 
 pub struct Engine {}
 
-fn to_display_scale(fraction: usize, max: usize, display_max: f32) -> f32 {
-    (fraction as f32 / max as f32) * display_max - display_max / 2.0
+#[derive(Clone, Debug)]
+struct Camera {
+    position: Vec3,
+    pitch: f32,
+    yaw: f32,
+}
+
+impl Camera {
+    fn direction(&self) -> glm::Vec3 {
+        let pitch_rad = self.pitch * PI / 180.0;
+        let yaw_rad = self.yaw * PI / 180.0;
+
+        glm::vec3(
+            yaw_rad.cos() * pitch_rad.cos(),
+            yaw_rad.sin() * pitch_rad.cos(),
+            pitch_rad.sin(),
+        )
+    }
+    fn look_at(&self) -> glm::Mat4 {
+        glm::look_at(
+            &self.position,
+            &(self.position + self.direction()),
+            &glm::vec3(0., 0., 1.),
+        )
+    }
 }
 
 impl Engine {
@@ -57,52 +89,41 @@ impl Engine {
     pub fn run(&mut self) -> Result<()> {
         pretty_env_logger::init();
 
-        let levels = 5;
-        let parent_count = (0..levels).map(|i| 8usize.pow(i)).sum();
-        let size = 2usize.pow(levels);
-        let display_size = 4.;
+        let mut world = World::new();
 
-        let mut systems = GameState::new(display_size);
+        let size = 2;
 
-        let world_gen = WorldGen::new(1827382);
-
-        let player = Player::new(systems.get_id());
-        systems.add_player(player);
-
-        for i in 0..parent_count {
-            systems.physics.octree.split_node(i).expect("split failed");
-        }
-
-        let mut i = parent_count;
-
-        for x in 0..size {
-            for y in 0..size {
-                for z in 0..size {
-                    let value = world_gen.get(x, y, z);
-                    systems.physics.octree.set_at(
-                        [
-                            to_display_scale(x, size, display_size),
-                            to_display_scale(y, size, display_size),
-                            to_display_scale(z, size, display_size),
-                        ],
-                        value,
-                    );
-
-                    i += 1;
+        for z in -size..size {
+            for y in -size..size {
+                for x in -size..size {
+                    world.load(&ChunkId::new(x, y, z));
                 }
             }
         }
+
+        let mut systems = GameState::new();
+
+        let player = Player::new(systems.get_id());
+        systems.add_player(player);
 
         // main loop
         let event_loop = EventLoop::new();
         let window = WindowBuilder::new()
             .with_title("Game")
-            .with_inner_size(LogicalSize::new(1024, 768))
+            .with_inner_size(LogicalSize::new(1024 / 2, 768 / 2))
             .build(&event_loop)?;
-        let mut app = unsafe { App::create(&window, &systems.get_world_data())? };
+        let mut app = unsafe { App::create(&window, world.get_chunks())? };
 
         let mut destroying = false;
         let mut minimized = false;
+        let mut focused = false;
+        let mut grabbed = false;
+        let mut cursor_visible = false;
+
+        let center = PhysicalPosition::new(
+            (window.inner_size().width / 2) as f64,
+            (window.inner_size().height / 2) as f64,
+        );
 
         let mut previous_frame_start = Instant::now();
 
@@ -142,38 +163,103 @@ impl Engine {
                         app.destroy();
                     }
                 }
+                Event::WindowEvent {
+                    event: WindowEvent::MouseInput { state, button, .. },
+                    ..
+                } => {
+                    if !focused && state == ElementState::Released && button == MouseButton::Left {
+                        focused = true;
+                        grabbed = true;
+                        cursor_visible = false;
+                        window.set_cursor_grab(true).expect("Cursor lock failed");
+                        window.set_cursor_visible(false);
+                    }
+                }
+                Event::WindowEvent {
+                    event: WindowEvent::Focused(new_focus),
+                    ..
+                } => {
+                    focused = new_focus;
+                    grabbed = new_focus;
+                    cursor_visible = !new_focus;
+                    window
+                        .set_cursor_grab(new_focus)
+                        .expect("Cursor lock failed");
+                    window.set_cursor_visible(!new_focus);
+                }
+                Event::DeviceEvent {
+                    event:
+                        DeviceEvent::Key(KeyboardInput {
+                            state,
+                            virtual_keycode,
+                            ..
+                        }),
+                    ..
+                } => {
+                    let current_frame_start = Instant::now();
+                    let delta_time = current_frame_start
+                        .duration_since(previous_frame_start)
+                        .as_secs_f32();
+
+                    let mut delta = app.cam.direction();
+
+                    let a = if state == ElementState::Pressed {
+                        1.
+                    } else {
+                        0.
+                    };
+
+                    delta.x *= delta_time * 6. * a;
+                    delta.y *= delta_time * 6. * a;
+                    delta.z *= delta_time * 6. * a;
+
+                    match virtual_keycode {
+                        Some(VirtualKeyCode::W) => {
+                            app.cam.position += delta;
+                        }
+                        Some(VirtualKeyCode::S) => {
+                            app.cam.position -= delta;
+                        }
+                        Some(VirtualKeyCode::A) => {
+                            app.cam.position += glm::vec3(0., 1., 0.);
+                        }
+                        Some(VirtualKeyCode::D) => {
+                            app.cam.position -= glm::vec3(0., 1., 0.);
+                        }
+                        _ => (),
+                    }
+                }
+                Event::WindowEvent {
+                    event: WindowEvent::KeyboardInput { input, .. },
+                    ..
+                } => {
+                    // gain focus & enable FPS controls
+                    match input.virtual_keycode {
+                        Some(VirtualKeyCode::Escape) => {
+                            grabbed = false;
+                            cursor_visible = true;
+                            window.set_cursor_grab(false).expect("Cursor lock failed");
+                            window.set_cursor_visible(true);
+                        }
+                        _ => (),
+                    }
+                }
+                Event::WindowEvent {
+                    event: WindowEvent::CursorMoved { position, .. },
+                    ..
+                } => {
+                    if grabbed && focused && !cursor_visible {
+                        let (x, y) = (center.x - position.x, center.y - position.y);
+                        window
+                            .set_cursor_position(center)
+                            .expect("Cursor position setting failed");
+                        app.cam.pitch = (app.cam.pitch + (y * 0.1) as f32).clamp(-89.9, 89.9);
+                        app.cam.yaw = app.cam.yaw + (x * 0.1) as f32;
+                    }
+                }
                 _ => {}
             }
         });
-    }
-}
-
-struct WorldGen {
-    noise: Perlin,
-}
-
-impl WorldGen {
-    fn new(seed: u32) -> Self {
-        Self {
-            noise: Perlin::new(seed),
-        }
-    }
-    fn get(&self, x: usize, y: usize, z: usize) -> Material {
-        let scale = 10.0;
-
-        let value = self
-            .noise
-            .get([x as f64 / scale, y as f64 / scale, z as f64 / scale]);
-
-        self.to_material(value)
-    }
-
-    fn to_material(&self, value: f64) -> Material {
-        match value {
-            x if x > 0.5 => Material::Stone,
-            x if x > 0.3 => Material::Grass,
-            _ => Material::Air,
-        }
     }
 }
 
@@ -192,17 +278,27 @@ pub struct App {
     frame: usize,
     pub resized: bool,
     start: Instant,
+    cam: Camera,
 }
 
 impl App {
     /// Creates our Vulkan app.
-    pub unsafe fn create(window: &Window, voxels: &Vec<&Node>) -> Result<Self> {
+    pub unsafe fn create(
+        window: &Window,
+        voxels: Vec<(&ChunkId, &Box<ChunkData>)>,
+    ) -> Result<Self> {
         let loader = LibloadingLoader::new(LIBRARY)?;
         let entry = Entry::new(loader).map_err(|b| anyhow!("{}", b))?;
         let mut data = AppData::default();
         let instance = create_instance(window, &entry, &mut data)?;
         data.surface = vk_window::create_surface(&instance, window)?;
         let device = device::pick_device(&instance, &mut data)?;
+
+        let cam = Camera {
+            position: glm::vec3(4.5, 4.5, 3.0),
+            pitch: -10.0,
+            yaw: 180.0,
+        };
         create_swapchain(window, &instance, &device, &mut data)?;
         create_swapchain_image_views(&device, &mut data)?;
         create_render_pass(&instance, &device, &mut data)?;
@@ -231,6 +327,7 @@ impl App {
             frame: 0,
             resized: false,
             start: Instant::now(),
+            cam,
         })
     }
 
@@ -304,19 +401,13 @@ impl App {
     }
 
     unsafe fn update_uniform_buffer(&self, image_index: usize) -> Result<()> {
-        let time = self.start.elapsed().as_secs_f32();
-
         let model = glm::rotate(
             &glm::identity(),
-            time * glm::radians(&glm::vec1(90.0))[0],
+            glm::radians(&glm::vec1(90.0))[0],
             &glm::vec3(0.0, 0.0, 1.0),
         );
 
-        let view = glm::look_at(
-            &glm::vec3(3.0, 3.0, 3.0),
-            &glm::vec3(0.0, 0.0, 1.0),
-            &glm::vec3(0.0, 0.0, 1.0),
-        );
+        let view = self.cam.look_at();
 
         let mut proj = glm::perspective_rh_zo(
             self.data.swapchain_extent.width as f32 / self.data.swapchain_extent.height as f32,
@@ -438,15 +529,14 @@ impl App {
     }
 }
 
-fn load_world(data: &mut AppData, voxels: &Vec<&Node>) -> Result<()> {
+fn load_world(data: &mut AppData, chunks: Vec<(&ChunkId, &Box<ChunkData>)>) -> Result<()> {
     let triangle_offset: [u32; 36] = [
-        //Top
-        2, 7, 6, 2, 3, 7, //Bottom
-        0, 4, 5, 0, 5, 1, //Left
-        0, 2, 6, 0, 6, 4, //Right
-        1, 7, 3, 1, 5, 7, //Front
-        0, 3, 2, 0, 1, 3, //Back
-        4, 6, 7, 4, 7, 5,
+        2, 7, 6, 2, 3, 7, //Top
+        0, 4, 5, 0, 5, 1, //Bottom
+        0, 2, 6, 0, 6, 4, //Left
+        1, 7, 3, 1, 5, 7, //Right
+        0, 3, 2, 0, 1, 3, //Front
+        4, 6, 7, 4, 7, 5, //Back
     ];
 
     let position_offset: [(f32, f32, f32); 8] = [
@@ -462,31 +552,46 @@ fn load_world(data: &mut AppData, voxels: &Vec<&Node>) -> Result<()> {
 
     let mut i = 1.0;
 
-    for voxel in voxels {
-        if voxel.data.is_opaque() {
-            let starting_vertex: u32 = data.vertices.len() as u32;
+    for (chunk_id, chunk_data) in chunks {
+        let chunk_pos = WorldPosition::from(chunk_id.clone());
+        for vz in 0..CHUNK_SIZE {
+            for vy in 0..CHUNK_SIZE {
+                for vx in 0..CHUNK_SIZE {
+                    let voxel_pos =
+                        chunk_pos.clone() + WorldPosition::new(vx as i32, vy as i32, vz as i32);
 
-            for (x, y, z) in position_offset {
-                let vertex = Vertex {
-                    pos: glm::vec3(
-                        voxel.center[0] + x * voxel.half_size,
-                        voxel.center[1] + y * voxel.half_size,
-                        voxel.center[2] + z * voxel.half_size,
-                    ),
-                    color: match voxel.data {
-                        Material::Grass => glm::vec3(0.2, 0.5 + (i % 0.31212), 0.2),
-                        Material::Water => glm::vec3(0.0, 0.1 + (i % 0.15232), 0.8),
-                        Material::Stone => glm::vec3(0.3 + (i % 0.3213992), 0.3, 0.3),
-                        _ => glm::vec3(1.0, 0., 0.),
-                    },
-                };
-                data.vertices.push(vertex);
-            }
-            for offset in triangle_offset {
-                data.indices.push(starting_vertex + offset);
+                    if let Some(material) = chunk_data.get(vx, vy, vz) {
+                        let starting_vertex: u32 = data.vertices.len() as u32;
+
+                        for (fx, fy, fz) in position_offset {
+                            let vertex = Vertex {
+                                pos: glm::vec3(
+                                    (voxel_pos.x as f32 + fx * 0.5) * 0.1,
+                                    (voxel_pos.y as f32 + fy * 0.5) * 0.1,
+                                    (voxel_pos.z as f32 + fz * 0.5) * 0.1,
+                                ),
+                                // color: glm::vec3(
+                                //     vx as f32 / 5. + 0.2,
+                                //     vy as f32 / 5. + 0.2,
+                                //     vz as f32 / 5. + 0.2,
+                                // ),
+                                color: match material {
+                                    Material::Grass => glm::vec3(0.2, 0.5 + (i % 0.31212), 0.2),
+                                    Material::Water => glm::vec3(0.0, 0.1 + (i % 0.15232), 0.8),
+                                    Material::Stone => glm::vec3(0.3 + (i % 0.3213992), 0.3, 0.3),
+                                    _ => glm::vec3(1.0, 0., 0.),
+                                },
+                            };
+                            data.vertices.push(vertex);
+                        }
+                        for offset in triangle_offset {
+                            data.indices.push(starting_vertex + offset);
+                        }
+                    }
+                    i += 0.13;
+                }
             }
         }
-        i += 0.13;
     }
 
     Ok(())
@@ -1055,8 +1160,6 @@ unsafe fn create_vertex_buffer(
     data: &mut AppData,
 ) -> Result<()> {
     let size = (size_of::<Vertex>() * data.vertices.len()) as u64;
-
-    // println!("{:#?}", data.vertices);
 
     let (staging_buffer, staging_buffer_memory) = create_buffer(
         instance,
