@@ -1,70 +1,52 @@
 use crate::{
     chunk_manager::{ChunkId, WorldPosition},
     fixed_tree::ChunkData,
-    CHUNK_SIZE,
+    terrain_noise, CHUNK_SIZE,
 };
 use gamedata::material::Material;
-use simdnoise::NoiseBuilder;
 
-pub struct ChunkGenerator {
-    frequency: f32,
-    octaves: u8,
-    gain: f32,
-    seed: i32,
-    lacunarity: f32,
-}
-
+pub struct ChunkGenerator {}
 impl ChunkGenerator {
     pub fn new() -> Self {
-        Self {
-            frequency: 0.5,
-            octaves: 5,
-            gain: 2.0,
-            seed: 1337,
-            lacunarity: 0.5,
-        }
+        Self {}
     }
 
     pub fn generate(&self, id: &ChunkId) -> ChunkData {
-        let world_pos: WorldPosition = id.clone().into();
-
-        let (samples, ..) = NoiseBuilder::turbulence_3d_offset(
-            world_pos.x as f32,
-            CHUNK_SIZE,
-            world_pos.y as f32,
-            CHUNK_SIZE,
-            world_pos.z as f32,
-            CHUNK_SIZE,
-        )
-        .with_freq(self.frequency)
-        .with_gain(self.gain)
-        .with_lacunarity(self.lacunarity)
-        .with_octaves(self.octaves)
-        .with_seed(self.seed)
-        .generate();
+        let WorldPosition {
+            x: sx,
+            y: sy,
+            z: sz,
+        } = id.clone().into();
 
         let mut data = ChunkData::default();
-        let mut x = 0;
-        let mut y = 0;
-        let mut z = 0;
 
-        samples.iter().map(|s| Material::from(*s)).for_each(|m| {
-            let border = (x == 0 || x == CHUNK_SIZE - 1) as u8
-                + (y == 0 || y == CHUNK_SIZE - 1) as u8
-                + (z == 0 || z == CHUNK_SIZE - 1) as u8;
-            if border > 1 {
-                data.set(x, y, z, Material::Stone);
-            } else if m != Material::Air {
-                data.set(x, y, z, m);
+        let mut voxel_pos = WorldPosition::new(sx, sy, sz);
+        let noise = terrain_noise::composite_3d(&voxel_pos);
+        let mut noise_iter = noise.iter();
+
+        for y in 0..CHUNK_SIZE {
+            voxel_pos.y = sy + y as i32;
+            for x in 0..CHUNK_SIZE {
+                voxel_pos.x = sx + x as i32;
+                let (bh, r) = noise_iter.next().unwrap().to_owned();
+                let world_height = (20. + (50. * bh) + (10. * r)) as i32;
+
+                let chunk_height = (world_height - sz).clamp(0, CHUNK_SIZE as i32) as usize;
+
+                for z in 0..chunk_height {
+                    data.set(
+                        x,
+                        y,
+                        z,
+                        if z == chunk_height - 1 {
+                            Material::Grass
+                        } else {
+                            Material::Stone
+                        },
+                    );
+                }
             }
-
-            x += 1;
-            y += (x == CHUNK_SIZE) as usize;
-            z += (y == CHUNK_SIZE) as usize;
-            x %= CHUNK_SIZE;
-            y %= CHUNK_SIZE;
-            z %= CHUNK_SIZE;
-        });
+        }
 
         data
     }

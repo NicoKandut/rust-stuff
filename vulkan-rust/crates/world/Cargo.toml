@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 gamedata = {path = "../gamedata", version = "0.0.0"}
+nalgebra-glm = "0.10"
 octree = {path = "../octree", version = "0.0.0"}
 rand = "0.8.5"
 simdnoise = "3.1.6"

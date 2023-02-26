@@ -80,6 +80,7 @@ impl ChunkManager {
     }
 
     pub fn insert(&mut self, id: &ChunkId, data: ChunkData) {
+        println!("Inserting chunk: {:?}", id);
         self.chunks.insert(id.clone(), Box::new(data));
     }
 

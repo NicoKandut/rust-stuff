@@ -1,50 +1,58 @@
 #![allow(unused)]
+#![feature(test)]
 
+extern crate test;
+
+use crate::{
+    device::{queuefamilies::QueueFamilyIndices, swapchainsupport::SwapchainSupport},
+    graphics::Vertex,
+};
+use anyhow::{anyhow, Result};
+use camera::{Camera, MovingCamera};
+use gamedata::{material::Material, vector::Vec3};
+use gamestate::GameState;
+use graphics::mesh_generator::{self, generate_greedy_mesh};
+use input::MovementInput;
+use log::*;
+use nalgebra_glm as glm;
+use player::Player;
+use png::chunk;
+use rayon::prelude::*;
+use std::{
+    collections::HashSet, f32::consts::PI, ffi::CStr, fs::File, mem::size_of, os::raw::c_void,
+    ptr::copy_nonoverlapping as memcpy, time::Instant, usize,
+};
+use vulkanalia::{
+    loader::{LibloadingLoader, LIBRARY},
+    prelude::v1_0::*,
+    vk::ExtDebugUtilsExtension,
+    vk::KhrSurfaceExtension,
+    vk::KhrSwapchainExtension,
+    window as vk_window,
+};
+use winit::{
+    dpi::{LogicalSize, PhysicalPosition},
+    event::{
+        DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent,
+    },
+    event_loop::{ControlFlow, EventLoop},
+    window::{Window, WindowBuilder},
+};
+use world::{
+    chunk_manager::{ChunkId, WorldPosition},
+    fixed_tree::ChunkData,
+    World, CHUNK_SIZE,
+};
+
+mod camera;
 pub mod device;
 mod gamestate;
 pub mod graphics;
+pub mod input;
 pub mod models;
 mod player;
 pub mod render;
 pub mod systems;
-
-use crate::device::queuefamilies::QueueFamilyIndices;
-use crate::device::swapchainsupport::SwapchainSupport;
-use crate::graphics::Vertex;
-use anyhow::{anyhow, Result};
-use gamedata::material::Material;
-use gamedata::vector::Vec3;
-use gamestate::GameState;
-use log::*;
-use player::Player;
-use std::ffi::CStr;
-use std::os::raw::c_void;
-use std::usize;
-use std::{collections::HashSet, f32::consts::PI};
-use world::fixed_tree::ChunkData;
-use world::{
-    chunk_manager::{ChunkId, WorldPosition},
-    World, CHUNK_SIZE,
-};
-// use tobj::Model;
-use vulkanalia::loader::{LibloadingLoader, LIBRARY};
-use vulkanalia::prelude::v1_0::*;
-use vulkanalia::vk::ExtDebugUtilsExtension;
-use vulkanalia::vk::KhrSurfaceExtension;
-use vulkanalia::window as vk_window;
-use winit::dpi::{LogicalSize, PhysicalPosition};
-use winit::event::{
-    DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent,
-};
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::{Window, WindowBuilder};
-// use winit::platform::windows::WindowExtWindows;
-use nalgebra_glm as glm;
-use std::fs::File;
-use std::mem::size_of;
-use std::ptr::copy_nonoverlapping as memcpy;
-use std::time::Instant;
-use vulkanalia::vk::KhrSwapchainExtension;
 
 pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
 pub const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
@@ -53,33 +61,6 @@ pub const VALIDATION_LAYER: vk::ExtensionName =
 pub const DEVICE_EXTENSIONS: &[vk::ExtensionName] = &[vk::KHR_SWAPCHAIN_EXTENSION.name];
 
 pub struct Engine {}
-
-#[derive(Clone, Debug)]
-struct Camera {
-    position: Vec3,
-    pitch: f32,
-    yaw: f32,
-}
-
-impl Camera {
-    fn direction(&self) -> glm::Vec3 {
-        let pitch_rad = self.pitch * PI / 180.0;
-        let yaw_rad = self.yaw * PI / 180.0;
-
-        glm::vec3(
-            yaw_rad.cos() * pitch_rad.cos(),
-            yaw_rad.sin() * pitch_rad.cos(),
-            pitch_rad.sin(),
-        )
-    }
-    fn look_at(&self) -> glm::Mat4 {
-        glm::look_at(
-            &self.position,
-            &(self.position + self.direction()),
-            &glm::vec3(0., 0., 1.),
-        )
-    }
-}
 
 impl Engine {
     pub fn create() -> Self {
@@ -91,14 +72,26 @@ impl Engine {
 
         let mut world = World::new();
 
-        let size = 2;
+        let from_s = -2;
+        let to_s = 2;
 
-        for z in -size..size {
-            for y in -size..size {
-                for x in -size..size {
-                    world.load(&ChunkId::new(x, y, z));
+        let mut chunks_to_load = Vec::new();
+
+        for z in 0..1 {
+            for y in from_s..to_s {
+                for x in from_s..to_s {
+                    chunks_to_load.push(ChunkId::new(x, y, z))
                 }
             }
+        }
+
+        let chunk_data: Vec<(&ChunkId, ChunkData)> = chunks_to_load
+            .par_iter()
+            .map(|id| (id, world.generator.generate(id)))
+            .collect();
+
+        for (id, data) in chunk_data {
+            world.manager.insert(id, data)
         }
 
         let mut systems = GameState::new();
@@ -135,11 +128,24 @@ impl Engine {
 
                     let delta_time = &current_frame_start.duration_since(previous_frame_start);
 
+                    let step = (app.cam.movement() * delta_time.as_secs_f32());
+
+                    app.cam.cam.position += step;
+
+                    let p = [
+                        app.cam.cam.position.x,
+                        app.cam.cam.position.y,
+                        app.cam.cam.position.z,
+                    ];
+                    if world.intersects_point(p) {
+                        app.cam.cam.position -= step;
+                    }
+
                     systems.update(delta_time);
 
                     previous_frame_start = current_frame_start;
 
-                    unsafe { app.render(&window) }.unwrap()
+                    unsafe { app.render(&window, &world) }.unwrap()
                 }
                 Event::WindowEvent {
                     event: WindowEvent::Resized(size),
@@ -196,35 +202,36 @@ impl Engine {
                         }),
                     ..
                 } => {
-                    let current_frame_start = Instant::now();
-                    let delta_time = current_frame_start
-                        .duration_since(previous_frame_start)
-                        .as_secs_f32();
+                    let pressed = (state == ElementState::Pressed) as isize;
 
-                    let mut delta = app.cam.direction();
-
-                    let a = if state == ElementState::Pressed {
-                        1.
-                    } else {
-                        0.
-                    };
-
-                    delta.x *= delta_time * 6. * a;
-                    delta.y *= delta_time * 6. * a;
-                    delta.z *= delta_time * 6. * a;
+                    if state == ElementState::Pressed {
+                        match virtual_keycode {
+                            Some(VirtualKeyCode::Left) if app.render_distance > 10.0 => {
+                                app.render_distance -= 10.0
+                            }
+                            Some(VirtualKeyCode::Right) => app.render_distance += 10.0,
+                            _ => {}
+                        }
+                    }
 
                     match virtual_keycode {
                         Some(VirtualKeyCode::W) => {
-                            app.cam.position += delta;
+                            app.cam.input.dir[0] = pressed;
                         }
                         Some(VirtualKeyCode::S) => {
-                            app.cam.position -= delta;
-                        }
-                        Some(VirtualKeyCode::A) => {
-                            app.cam.position += glm::vec3(0., 1., 0.);
+                            app.cam.input.dir[1] = pressed;
                         }
                         Some(VirtualKeyCode::D) => {
-                            app.cam.position -= glm::vec3(0., 1., 0.);
+                            app.cam.input.dir[2] = pressed;
+                        }
+                        Some(VirtualKeyCode::A) => {
+                            app.cam.input.dir[3] = pressed;
+                        }
+                        Some(VirtualKeyCode::Space) => {
+                            app.cam.input.dir[4] = pressed;
+                        }
+                        Some(VirtualKeyCode::C) => {
+                            app.cam.input.dir[5] = pressed;
                         }
                         _ => (),
                     }
@@ -253,8 +260,8 @@ impl Engine {
                         window
                             .set_cursor_position(center)
                             .expect("Cursor position setting failed");
-                        app.cam.pitch = (app.cam.pitch + (y * 0.1) as f32).clamp(-89.9, 89.9);
-                        app.cam.yaw = app.cam.yaw + (x * 0.1) as f32;
+                        app.cam.cam.add_pitch((y * 0.1) as f32);
+                        app.cam.cam.add_yaw((x * 0.1) as f32);
                     }
                 }
                 _ => {}
@@ -278,7 +285,8 @@ pub struct App {
     frame: usize,
     pub resized: bool,
     start: Instant,
-    cam: Camera,
+    cam: MovingCamera,
+    render_distance: f32,
 }
 
 impl App {
@@ -287,6 +295,7 @@ impl App {
         window: &Window,
         voxels: Vec<(&ChunkId, &Box<ChunkData>)>,
     ) -> Result<Self> {
+        let start = Instant::now();
         let loader = LibloadingLoader::new(LIBRARY)?;
         let entry = Entry::new(loader).map_err(|b| anyhow!("{}", b))?;
         let mut data = AppData::default();
@@ -294,17 +303,21 @@ impl App {
         data.surface = vk_window::create_surface(&instance, window)?;
         let device = device::pick_device(&instance, &mut data)?;
 
-        let cam = Camera {
-            position: glm::vec3(4.5, 4.5, 3.0),
-            pitch: -10.0,
-            yaw: 180.0,
+        let cam = MovingCamera {
+            cam: Camera {
+                position: glm::vec3(-1., -1., 64.0),
+                pitch: -1.,
+                yaw: PI / 4.,
+            },
+            vel: 10.0,
+            input: MovementInput { dir: [0; 6] },
         };
         create_swapchain(window, &instance, &device, &mut data)?;
         create_swapchain_image_views(&device, &mut data)?;
         create_render_pass(&instance, &device, &mut data)?;
         create_descriptor_set_layout(&device, &mut data)?;
         create_pipeline(&device, &mut data)?;
-        create_command_pool(&instance, &device, &mut data)?;
+        create_command_pools(&instance, &device, &mut data)?;
         create_depth_objects(&instance, &device, &mut data)?;
         create_framebuffers(&device, &mut data)?;
         create_texture_image(&instance, &device, &mut data)?;
@@ -317,7 +330,7 @@ impl App {
         create_uniform_buffers(&instance, &device, &mut data)?;
         create_descriptor_pool(&device, &mut data)?;
         create_descriptor_sets(&device, &mut data)?;
-        create_command_buffers(&device, &mut data)?;
+        create_command_buffers(&(start.elapsed().as_secs_f32() / 5.), &device, &mut data)?;
         create_sync_objects(&device, &mut data)?;
         Ok(Self {
             entry,
@@ -326,13 +339,14 @@ impl App {
             device,
             frame: 0,
             resized: false,
-            start: Instant::now(),
+            start,
             cam,
+            render_distance: 10.0,
         })
     }
 
     /// Renders a frame for our Vulkan app.
-    pub unsafe fn render(&mut self, window: &Window) -> Result<()> {
+    pub unsafe fn render(&mut self, window: &Window, world: &World) -> Result<()> {
         let in_flight_fence = self.data.in_flight_fences[self.frame];
 
         self.device
@@ -359,6 +373,7 @@ impl App {
 
         self.data.images_in_flight[image_index] = in_flight_fence;
 
+        self.update_command_buffer(image_index, world)?;
         self.update_uniform_buffer(image_index)?;
 
         let wait_semaphores = &[self.data.image_available_semaphores[self.frame]];
@@ -400,26 +415,182 @@ impl App {
         Ok(())
     }
 
-    unsafe fn update_uniform_buffer(&self, image_index: usize) -> Result<()> {
+    unsafe fn update_command_buffer(&mut self, image_index: usize, world: &World) -> Result<()> {
+        let command_pool = self.data.command_pools[image_index];
+        self.device
+            .reset_command_pool(command_pool, vk::CommandPoolResetFlags::empty())?;
+
+        let command_buffer = self.data.command_buffers[image_index];
+
+        let time = self.start.elapsed().as_secs_f32();
+
         let model = glm::rotate(
             &glm::identity(),
-            glm::radians(&glm::vec1(90.0))[0],
+            time * glm::radians(&glm::vec1(90.0))[0],
             &glm::vec3(0.0, 0.0, 1.0),
         );
+        let (_, model_bytes, _) = model.as_slice().align_to::<u8>();
 
-        let view = self.cam.look_at();
+        let light = glm::vec3(1.0, 1.0, -1.0);
+        let (_, light_bytes, _) = light.as_slice().align_to::<u8>();
+
+        let info = vk::CommandBufferBeginInfo::builder();
+
+        self.device.begin_command_buffer(command_buffer, &info)?;
+
+        let render_area = vk::Rect2D::builder()
+            .offset(vk::Offset2D::default())
+            .extent(self.data.swapchain_extent);
+
+        let color_clear_value = vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: [0.0, 0.0, 0.0, 1.0],
+            },
+        };
+
+        let depth_clear_value = vk::ClearValue {
+            depth_stencil: vk::ClearDepthStencilValue {
+                depth: 1.0,
+                stencil: 0,
+            },
+        };
+
+        let clear_values = &[color_clear_value, depth_clear_value];
+        let info = vk::RenderPassBeginInfo::builder()
+            .render_pass(self.data.render_pass)
+            .framebuffer(self.data.framebuffers[image_index])
+            .render_area(render_area)
+            .clear_values(clear_values);
+
+        self.device.cmd_begin_render_pass(
+            command_buffer,
+            &info,
+            vk::SubpassContents::SECONDARY_COMMAND_BUFFERS,
+        );
+
+        let secondary_command_buffers = world
+            .get_chunks()
+            .iter()
+            .enumerate()
+            .map(|(index, (id, data))| {
+                self.update_secondary_command_buffer(image_index, index, id, data)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.device
+            .cmd_execute_commands(command_buffer, &secondary_command_buffers[..]);
+
+        self.device.cmd_end_render_pass(command_buffer);
+
+        self.device.end_command_buffer(command_buffer)?;
+
+        Ok(())
+    }
+
+    unsafe fn update_secondary_command_buffer(
+        &mut self,
+        image_index: usize,
+        index: usize,
+        id: &ChunkId,
+        data: &ChunkData,
+    ) -> Result<vk::CommandBuffer> {
+        self.data
+            .secondary_command_buffers
+            .resize_with(image_index + 1, Vec::new);
+        let command_buffers = &mut self.data.secondary_command_buffers[image_index];
+        while index >= command_buffers.len() {
+            let allocate_info = vk::CommandBufferAllocateInfo::builder()
+                .command_pool(self.data.command_pools[image_index])
+                .level(vk::CommandBufferLevel::SECONDARY)
+                .command_buffer_count(1);
+
+            let command_buffer = self.device.allocate_command_buffers(&allocate_info)?[0];
+
+            command_buffers.push(command_buffer);
+        }
+
+        let command_buffer = command_buffers[index];
+
+        let start = WorldPosition::from(id.clone());
+        let x = start.x as f32;
+        let y = start.y as f32;
+        let z = start.z as f32;
+
+        let model = glm::translate(&glm::identity(), &glm::vec3(x, y, z));
+
+        let time = self.start.elapsed().as_secs_f32();
+
+        let model = glm::rotate(&model, 0.0, &glm::vec3(0.0, 0.0, 1.0));
+
+        let (_, model_bytes, _) = model.as_slice().align_to::<u8>();
+
+        let opacity = (index + 1) as f32 * 0.25;
+        let opacity_bytes = &opacity.to_ne_bytes()[..];
+
+        let inheritance_info = vk::CommandBufferInheritanceInfo::builder()
+            .render_pass(self.data.render_pass)
+            .subpass(0)
+            .framebuffer(self.data.framebuffers[image_index]);
+
+        let info = vk::CommandBufferBeginInfo::builder()
+            .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE)
+            .inheritance_info(&inheritance_info);
+
+        self.device.begin_command_buffer(command_buffer, &info)?;
+
+        self.device.cmd_bind_pipeline(
+            command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            self.data.pipeline,
+        );
+        self.device
+            .cmd_bind_vertex_buffers(command_buffer, 0, &[self.data.vertex_buffer], &[0]);
+        self.device.cmd_bind_index_buffer(
+            command_buffer,
+            self.data.index_buffer,
+            0,
+            vk::IndexType::UINT32,
+        );
+        self.device.cmd_bind_descriptor_sets(
+            command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            self.data.pipeline_layout,
+            0,
+            &[self.data.descriptor_sets[image_index]],
+            &[],
+        );
+        self.device.cmd_push_constants(
+            command_buffer,
+            self.data.pipeline_layout,
+            vk::ShaderStageFlags::VERTEX,
+            0,
+            model_bytes,
+        );
+        self.device.cmd_push_constants(
+            command_buffer,
+            self.data.pipeline_layout,
+            vk::ShaderStageFlags::FRAGMENT,
+            64,
+            opacity_bytes,
+        );
+        self.device
+            .cmd_draw_indexed(command_buffer, self.data.indices.len() as u32, 1, 0, 0, 0);
+
+        self.device.end_command_buffer(command_buffer)?;
+
+        Ok(command_buffer)
+    }
+
+    unsafe fn update_uniform_buffer(&self, image_index: usize) -> Result<()> {
+        let view = self.cam.cam.look_at();
 
         let mut proj = glm::perspective_rh_zo(
             self.data.swapchain_extent.width as f32 / self.data.swapchain_extent.height as f32,
             glm::radians(&glm::vec1(45.0))[0],
             0.1,
-            10.0,
+            3000.0,
         );
-
         proj[(1, 1)] *= -1.0;
-
-        let ubo = UniformBufferObject { model, view, proj };
-
+        let ubo = UniformBufferObject { view, proj };
         let memory = self.device.map_memory(
             self.data.uniform_buffers_memory[image_index],
             0,
@@ -447,7 +618,11 @@ impl App {
         create_uniform_buffers(&self.instance, &self.device, &mut self.data)?;
         create_descriptor_pool(&self.device, &mut self.data)?;
         create_descriptor_sets(&self.device, &mut self.data)?;
-        create_command_buffers(&self.device, &mut self.data)?;
+        create_command_buffers(
+            &(self.start.elapsed().as_secs_f32() / 5.),
+            &self.device,
+            &mut self.data,
+        )?;
         Ok(())
     }
 
@@ -456,6 +631,11 @@ impl App {
         self.device.device_wait_idle().unwrap();
 
         self.destroy_swapchain();
+        self.data
+            .command_pools
+            .iter()
+            .for_each(|p| self.device.destroy_command_pool(*p, None));
+
         self.device.destroy_sampler(self.data.texture_sampler, None);
         self.device
             .destroy_image_view(self.data.texture_image_view, None);
@@ -515,8 +695,6 @@ impl App {
             .framebuffers
             .iter()
             .for_each(|f| self.device.destroy_framebuffer(*f, None));
-        self.device
-            .free_command_buffers(self.data.command_pool, &self.data.command_buffers);
         self.device.destroy_pipeline(self.data.pipeline, None);
         self.device
             .destroy_pipeline_layout(self.data.pipeline_layout, None);
@@ -530,68 +708,12 @@ impl App {
 }
 
 fn load_world(data: &mut AppData, chunks: Vec<(&ChunkId, &Box<ChunkData>)>) -> Result<()> {
-    let triangle_offset: [u32; 36] = [
-        2, 7, 6, 2, 3, 7, //Top
-        0, 4, 5, 0, 5, 1, //Bottom
-        0, 2, 6, 0, 6, 4, //Left
-        1, 7, 3, 1, 5, 7, //Right
-        0, 3, 2, 0, 1, 3, //Front
-        4, 6, 7, 4, 7, 5, //Back
-    ];
-
-    let position_offset: [(f32, f32, f32); 8] = [
-        (-1., -1., 1.),  //0
-        (1., -1., 1.),   //1
-        (-1., 1., 1.),   //2
-        (1., 1., 1.),    //3
-        (-1., -1., -1.), //4
-        (1., -1., -1.),  //5
-        (-1., 1., -1.),  //6
-        (1., 1., -1.),   //7
-    ];
-
-    let mut i = 1.0;
-
     for (chunk_id, chunk_data) in chunks {
-        let chunk_pos = WorldPosition::from(chunk_id.clone());
-        for vz in 0..CHUNK_SIZE {
-            for vy in 0..CHUNK_SIZE {
-                for vx in 0..CHUNK_SIZE {
-                    let voxel_pos =
-                        chunk_pos.clone() + WorldPosition::new(vx as i32, vy as i32, vz as i32);
+        let vertex_offset = data.vertices.len() as u32;
+        let mesh = generate_greedy_mesh(chunk_id, chunk_data, vertex_offset);
 
-                    if let Some(material) = chunk_data.get(vx, vy, vz) {
-                        let starting_vertex: u32 = data.vertices.len() as u32;
-
-                        for (fx, fy, fz) in position_offset {
-                            let vertex = Vertex {
-                                pos: glm::vec3(
-                                    (voxel_pos.x as f32 + fx * 0.5) * 0.1,
-                                    (voxel_pos.y as f32 + fy * 0.5) * 0.1,
-                                    (voxel_pos.z as f32 + fz * 0.5) * 0.1,
-                                ),
-                                // color: glm::vec3(
-                                //     vx as f32 / 5. + 0.2,
-                                //     vy as f32 / 5. + 0.2,
-                                //     vz as f32 / 5. + 0.2,
-                                // ),
-                                color: match material {
-                                    Material::Grass => glm::vec3(0.2, 0.5 + (i % 0.31212), 0.2),
-                                    Material::Water => glm::vec3(0.0, 0.1 + (i % 0.15232), 0.8),
-                                    Material::Stone => glm::vec3(0.3 + (i % 0.3213992), 0.3, 0.3),
-                                    _ => glm::vec3(1.0, 0., 0.),
-                                },
-                            };
-                            data.vertices.push(vertex);
-                        }
-                        for offset in triangle_offset {
-                            data.indices.push(starting_vertex + offset);
-                        }
-                    }
-                    i += 0.13;
-                }
-            }
-        }
+        data.vertices.extend(mesh.vertices);
+        data.indices.extend(mesh.indices);
     }
 
     Ok(())
@@ -616,7 +738,9 @@ pub struct AppData {
     pipeline: vk::Pipeline,
     framebuffers: Vec<vk::Framebuffer>,
     command_pool: vk::CommandPool,
+    command_pools: Vec<vk::CommandPool>,
     command_buffers: Vec<vk::CommandBuffer>,
+    secondary_command_buffers: Vec<Vec<vk::CommandBuffer>>,
     image_available_semaphores: Vec<vk::Semaphore>,
     render_finished_semaphores: Vec<vk::Semaphore>,
     in_flight_fences: Vec<vk::Fence>,
@@ -919,8 +1043,21 @@ unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()> {
         .attachments(attachments)
         .blend_constants([0.0, 0.0, 0.0, 0.0]);
 
+    let vert_push_constant_range = vk::PushConstantRange::builder()
+        .stage_flags(vk::ShaderStageFlags::VERTEX)
+        .offset(0)
+        .size(64 /* 16 × 4 byte floats */);
+
+    // let frag_push_constant_range = vk::PushConstantRange::builder()
+    //     .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+    //     .offset(64)
+    //     .size(12);
+
     let set_layouts = &[data.descriptor_set_layout];
-    let layout_info = vk::PipelineLayoutCreateInfo::builder().set_layouts(set_layouts);
+    let push_constant_ranges = &[vert_push_constant_range];
+    let layout_info = vk::PipelineLayoutCreateInfo::builder()
+        .set_layouts(set_layouts)
+        .push_constant_ranges(push_constant_ranges);
 
     data.pipeline_layout = device.create_pipeline_layout(&layout_info, None)?;
 
@@ -1051,82 +1188,49 @@ unsafe fn create_framebuffers(device: &Device, data: &mut AppData) -> Result<()>
     Ok(())
 }
 
-unsafe fn create_command_pool(
+unsafe fn create_command_pools(
     instance: &Instance,
     device: &Device,
     data: &mut AppData,
 ) -> Result<()> {
-    let indices = QueueFamilyIndices::get(instance, data, data.physical_device)?;
+    data.command_pool = create_command_pool(instance, device, data)?;
 
-    let info = vk::CommandPoolCreateInfo::builder()
-        .flags(vk::CommandPoolCreateFlags::empty()) // Optional.
-        .queue_family_index(indices.graphics);
-
-    data.command_pool = device.create_command_pool(&info, None)?;
+    let num_images = data.swapchain_images.len();
+    for _ in 0..num_images {
+        let command_pool = create_command_pool(instance, device, data)?;
+        data.command_pools.push(command_pool);
+    }
 
     Ok(())
 }
 
-unsafe fn create_command_buffers(device: &Device, data: &mut AppData) -> Result<()> {
-    let allocate_info = vk::CommandBufferAllocateInfo::builder()
-        .command_pool(data.command_pool)
-        .level(vk::CommandBufferLevel::PRIMARY)
-        .command_buffer_count(data.framebuffers.len() as u32);
+unsafe fn create_command_pool(
+    instance: &Instance,
+    device: &Device,
+    data: &mut AppData,
+) -> Result<vk::CommandPool> {
+    let indices = QueueFamilyIndices::get(instance, data, data.physical_device)?;
 
-    data.command_buffers = device.allocate_command_buffers(&allocate_info)?;
+    let info = vk::CommandPoolCreateInfo::builder()
+        .flags(vk::CommandPoolCreateFlags::TRANSIENT)
+        .queue_family_index(indices.graphics);
 
-    for (i, command_buffer) in data.command_buffers.iter().enumerate() {
-        let inheritance = vk::CommandBufferInheritanceInfo::builder();
+    Ok(device.create_command_pool(&info, None)?)
+}
 
-        let info = vk::CommandBufferBeginInfo::builder()
-            .flags(vk::CommandBufferUsageFlags::empty()) // Optional.
-            .inheritance_info(&inheritance); // Optional.
+unsafe fn create_command_buffers(time: &f32, device: &Device, data: &mut AppData) -> Result<()> {
+    let num_images = data.swapchain_images.len();
+    for image_index in 0..num_images {
+        let allocate_info = vk::CommandBufferAllocateInfo::builder()
+            .command_pool(data.command_pools[image_index])
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1);
 
-        device.begin_command_buffer(*command_buffer, &info)?;
-        let render_area = vk::Rect2D::builder()
-            .offset(vk::Offset2D::default())
-            .extent(data.swapchain_extent);
-
-        let color_clear_value = vk::ClearValue {
-            color: vk::ClearColorValue {
-                float32: [0.0, 0.0, 0.0, 1.0],
-            },
-        };
-
-        let depth_clear_value = vk::ClearValue {
-            depth_stencil: vk::ClearDepthStencilValue {
-                depth: 1.0,
-                stencil: 0,
-            },
-        };
-
-        let clear_values = &[color_clear_value, depth_clear_value];
-        let info = vk::RenderPassBeginInfo::builder()
-            .render_pass(data.render_pass)
-            .framebuffer(data.framebuffers[i])
-            .render_area(render_area)
-            .clear_values(clear_values);
-
-        device.cmd_begin_render_pass(*command_buffer, &info, vk::SubpassContents::INLINE);
-        device.cmd_bind_pipeline(
-            *command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            data.pipeline,
-        );
-        device.cmd_bind_vertex_buffers(*command_buffer, 0, &[data.vertex_buffer], &[0]);
-        device.cmd_bind_index_buffer(*command_buffer, data.index_buffer, 0, vk::IndexType::UINT32);
-        device.cmd_bind_descriptor_sets(
-            *command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            data.pipeline_layout,
-            0,
-            &[data.descriptor_sets[i]],
-            &[],
-        );
-        device.cmd_draw_indexed(*command_buffer, data.indices.len() as u32, 1, 0, 0, 0);
-        device.cmd_end_render_pass(*command_buffer);
-        device.end_command_buffer(*command_buffer)?;
+        let command_buffer = device.allocate_command_buffers(&allocate_info)?[0];
+        data.command_buffers.push(command_buffer);
     }
+
+    data.secondary_command_buffers = vec![vec![]; data.swapchain_images.len()];
 
     Ok(())
 }
@@ -1308,7 +1412,6 @@ unsafe fn create_index_buffer(
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 struct UniformBufferObject {
-    model: glm::Mat4,
     view: glm::Mat4,
     proj: glm::Mat4,
 }

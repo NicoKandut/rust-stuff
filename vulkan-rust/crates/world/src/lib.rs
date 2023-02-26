@@ -5,6 +5,7 @@ extern crate test;
 pub mod chunk_generator;
 pub mod chunk_manager;
 pub mod fixed_tree;
+pub mod terrain_noise;
 
 use chunk_generator::ChunkGenerator;
 use chunk_manager::{ChunkId, ChunkManager};
@@ -22,8 +23,8 @@ pub const CHUNK_SIZE_SAFE_CUBED: usize = CHUNK_SIZE_SAFE * CHUNK_SIZE_SAFE * CHU
 pub type ChunkDataCube = [[[Material; CHUNK_SIZE]; CHUNK_SIZE]; CHUNK_SIZE];
 
 pub struct World {
-    generator: ChunkGenerator,
-    manager: ChunkManager,
+    pub generator: ChunkGenerator,
+    pub manager: ChunkManager,
 }
 
 impl World {
@@ -41,5 +42,29 @@ impl World {
     pub fn load(&mut self, id: &ChunkId) {
         let data = self.generator.generate(id);
         self.manager.insert(id, data);
+    }
+
+    pub fn intersects_point(&self, p: [f32; 3]) -> bool {
+        let id = ChunkId::new(
+            p[0] as i32 / CHUNK_SIZE as i32,
+            p[1] as i32 / CHUNK_SIZE as i32,
+            p[2] as i32 / CHUNK_SIZE as i32,
+        );
+
+        let pos = [
+            ((p[0] - id.x as f32) as usize + CHUNK_SIZE) % CHUNK_SIZE,
+            ((p[1] - id.y as f32) as usize + CHUNK_SIZE) % CHUNK_SIZE,
+            ((p[2] - id.z as f32) as usize + CHUNK_SIZE) % CHUNK_SIZE,
+        ];
+
+        if let Some(chunk) = self.manager.get(&id) {
+            if let Some(material) = chunk.get(pos[0], pos[1], pos[2]) {
+                material.is_solid()
+            } else {
+                false
+            }
+        } else {
+            false
+        }
     }
 }
