@@ -403,6 +403,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "gamedata",
+ "graphics",
  "lazy_static",
  "log",
  "nalgebra-glm",
@@ -523,6 +524,15 @@ dependencies = [
  "cfg-if 1.0.0",
  "libc",
  "wasi 0.11.0+wasi-snapshot-preview1",
+]
+
+[[package]]
+name = "graphics"
+version = "0.0.0"
+dependencies = [
+ "gamedata",
+ "nalgebra-glm",
+ "vulkanalia",
 ]
 
 [[package]]
@@ -1682,8 +1692,8 @@ name = "world"
 version = "0.0.0"
 dependencies = [
  "gamedata",
+ "graphics",
  "nalgebra-glm",
- "octree",
  "rand 0.8.5",
  "simdnoise",
 ]

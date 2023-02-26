@@ -1,3 +1,5 @@
+use graphics::Mesh;
+
 use crate::{fixed_tree::ChunkData, CHUNK_SIZE};
 use std::{
     collections::BTreeMap,
@@ -66,12 +68,14 @@ impl From<ChunkId> for WorldPosition {
 
 pub struct ChunkManager {
     chunks: BTreeMap<ChunkId, Box<ChunkData>>,
+    meshes: BTreeMap<ChunkId, Box<Mesh>>,
 }
 
 impl ChunkManager {
     pub fn new() -> Self {
         Self {
             chunks: BTreeMap::new(),
+            meshes: BTreeMap::new(),
         }
     }
 
@@ -79,9 +83,12 @@ impl ChunkManager {
         self.chunks.len()
     }
 
-    pub fn insert(&mut self, id: &ChunkId, data: ChunkData) {
-        println!("Inserting chunk: {:?}", id);
+    pub fn insert_data(&mut self, id: &ChunkId, data: ChunkData) {
         self.chunks.insert(id.clone(), Box::new(data));
+    }
+
+    pub fn insert_mesh(&mut self, id: &ChunkId, mesh: Mesh) {
+        self.meshes.insert(id.clone(), Box::new(mesh));
     }
 
     pub fn get(&self, id: &ChunkId) -> Option<&ChunkData> {
@@ -114,7 +121,7 @@ mod test {
     #[test]
     fn insert() {
         let mut cm = ChunkManager::new();
-        cm.insert(&ChunkId::new(0, 0, 0), ChunkData::default());
+        cm.insert_data(&ChunkId::new(0, 0, 0), ChunkData::default());
         assert_eq!(cm.len(), 1);
     }
 
@@ -122,7 +129,7 @@ mod test {
     fn get() {
         let mut cm = ChunkManager::new();
         let id = ChunkId::new(0, 0, 0);
-        cm.insert(&id, ChunkData::default());
+        cm.insert_data(&id, ChunkData::default());
         let chunk = cm.get(&id);
         assert!(chunk.is_some());
 
@@ -135,7 +142,7 @@ mod test {
     fn mutate() {
         let mut cm = ChunkManager::new();
         let id = ChunkId::new(0, 0, 0);
-        cm.insert(&id, ChunkData::default());
+        cm.insert_data(&id, ChunkData::default());
         let chunk = cm.get_mut(&id).unwrap();
 
         chunk.set(0, 0, 0, Material::Stone);

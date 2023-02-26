@@ -5,6 +5,7 @@ extern crate test;
 pub mod chunk_generator;
 pub mod chunk_manager;
 pub mod fixed_tree;
+pub mod mesh_generator;
 pub mod terrain_noise;
 
 use chunk_generator::ChunkGenerator;
@@ -41,7 +42,7 @@ impl World {
 
     pub fn load(&mut self, id: &ChunkId) {
         let data = self.generator.generate(id);
-        self.manager.insert(id, data);
+        self.manager.insert_data(id, data);
     }
 
     pub fn intersects_point(&self, p: [f32; 3]) -> bool {

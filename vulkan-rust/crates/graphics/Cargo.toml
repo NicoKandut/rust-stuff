@@ -1,13 +1,11 @@
 [package]
-name = "world"
+name = "graphics"
 version = "0.0.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-nalgebra-glm = "0.10"
-rand = "0.8.5"
-simdnoise = "3.1.6"
 gamedata = {path = "../gamedata", version = "0.0.0"}
-graphics = {path = "../graphics", version = "0.0.0"}
+nalgebra-glm = "0.10"
+vulkanalia = { version = "=0.14.0" }

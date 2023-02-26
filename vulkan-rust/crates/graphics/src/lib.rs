@@ -1,5 +1,3 @@
-pub mod mesh_generator;
-
 use nalgebra_glm as glm;
 use std::hash::{Hash, Hasher};
 use std::mem::size_of;
@@ -70,4 +68,17 @@ impl Hash for Vertex {
         self.normal[1].to_bits().hash(state);
         self.normal[2].to_bits().hash(state);
     }
+}
+
+pub struct Mesh {
+    pub vertices: Vec<Vertex>,
+    pub indices: Vec<u32>,
+}
+
+impl Mesh {
+    pub fn new(vertices: Vec<Vertex>, indices: Vec<u32>) -> Self {
+        Self { vertices, indices }
+    }
+
+    pub fn new_buffered() {}
 }

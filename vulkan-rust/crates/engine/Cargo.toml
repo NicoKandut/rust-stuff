@@ -20,5 +20,6 @@ winit = "0.24"
 gamedata = {path = "../gamedata", version = "0.0.0"}
 octree = {path = "../octree", version = "0.0.0"}
 world = {path = "../world", version = "0.0.0"}
+graphics = {path = "../graphics", version = "0.0.0"}
 simdnoise = "3.1.6"
 rayon = "1.6.1"

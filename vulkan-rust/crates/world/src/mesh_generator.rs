@@ -2,20 +2,15 @@
 
 use std::os::windows::prelude::MetadataExt;
 
-use gamedata::material::Material;
-use nalgebra_glm as glm;
-use world::{
+use crate::{
     chunk_manager::{ChunkId, WorldPosition},
     fixed_tree::ChunkData,
     CHUNK_SIZE,
 };
+use gamedata::material::Material;
+use nalgebra_glm as glm;
 
-use super::Vertex;
-
-pub struct Mesh {
-    pub vertices: Vec<Vertex>,
-    pub indices: Vec<u32>,
-}
+use graphics::{Mesh, Vertex};
 
 const CS: usize = CHUNK_SIZE;
 
@@ -193,7 +188,7 @@ pub fn generate_greedy_mesh(id: &ChunkId, data: &ChunkData, first_vertex: u32) -
 mod test {
     use test::Bencher;
 
-    use world::{chunk_generator::ChunkGenerator, chunk_manager::ChunkId};
+    use crate::{chunk_generator::ChunkGenerator, chunk_manager::ChunkId};
 
     use super::generate_greedy_mesh;
 

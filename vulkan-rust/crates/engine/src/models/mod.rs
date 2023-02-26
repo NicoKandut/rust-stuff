@@ -1,4 +1,4 @@
-use super::graphics::Vertex;
+use graphics::Vertex;
 use crate::AppData;
 use anyhow::Result;
 use nalgebra_glm as glm;

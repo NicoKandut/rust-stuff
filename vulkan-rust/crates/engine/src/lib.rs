@@ -3,15 +3,12 @@
 
 extern crate test;
 
-use crate::{
-    device::{queuefamilies::QueueFamilyIndices, swapchainsupport::SwapchainSupport},
-    graphics::Vertex,
-};
+use crate::device::{queuefamilies::QueueFamilyIndices, swapchainsupport::SwapchainSupport};
 use anyhow::{anyhow, Result};
 use camera::{Camera, MovingCamera};
 use gamedata::{material::Material, vector::Vec3};
 use gamestate::GameState;
-use graphics::mesh_generator::{self, generate_greedy_mesh};
+use graphics::Vertex;
 use input::MovementInput;
 use log::*;
 use nalgebra_glm as glm;
@@ -41,13 +38,13 @@ use winit::{
 use world::{
     chunk_manager::{ChunkId, WorldPosition},
     fixed_tree::ChunkData,
+    mesh_generator::generate_greedy_mesh,
     World, CHUNK_SIZE,
 };
 
 mod camera;
 pub mod device;
 mod gamestate;
-pub mod graphics;
 pub mod input;
 pub mod models;
 mod player;
@@ -91,7 +88,7 @@ impl Engine {
             .collect();
 
         for (id, data) in chunk_data {
-            world.manager.insert(id, data)
+            world.manager.insert_data(id, data)
         }
 
         let mut systems = GameState::new();
