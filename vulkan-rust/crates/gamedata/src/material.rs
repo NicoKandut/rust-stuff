@@ -7,18 +7,14 @@ const OPAQUE: u8 = 0b0100_0000;
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Material {
-    //  passable, see-through
     Air = 0,
     Water = 1,
-
-    // solid, see-though
     Glass = SOLID | 0,
-
-    // opaque, solid
     Stone = SOLID | OPAQUE | 1,
     Grass = SOLID | OPAQUE | 2,
     Sand = SOLID | OPAQUE | 3,
     Snow = SOLID | OPAQUE | 4,
+    Ice = SOLID | OPAQUE | 5,
 }
 
 impl Material {
@@ -38,7 +34,8 @@ impl Material {
             Material::Stone => [0.3, 0.2, 0.2],
             Material::Grass => [0.1, 0.7, 0.3],
             Material::Sand => [0.75, 0.7, 0.50],
-            Material::Snow => [0.9, 0.9, 0.93],
+            Material::Snow => [0.8, 0.9, 1.],
+            Material::Ice => [0.5, 0.5, 1.],
         }
     }
 

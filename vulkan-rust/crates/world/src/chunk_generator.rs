@@ -29,8 +29,8 @@ impl ChunkGenerator {
             voxel_pos.y = sy + y as i32;
             for x in 0..CHUNK_SIZE {
                 voxel_pos.x = sx + x as i32;
-                let ((bh, _r), temp) = noise_iter.next().unwrap().to_owned();
-                let world_height = (1. * bh) as i32;
+                let ((bh, r), temp) = noise_iter.next().unwrap().to_owned();
+                let world_height = (bh * r.abs()) as i32;
 
                 let chunk_height = (world_height - sz).clamp(0, CHUNK_SIZE as i32) as usize;
 
@@ -41,14 +41,29 @@ impl ChunkGenerator {
                         z,
                         if sz + z as i32 == world_height - 1 {
                             match temp {
-                                x if x < -0.1 => Material::Snow,
-                                x if x < 0.1 => Material::Grass,
+                                x if x < 0. => Material::Snow,
+                                x if x < 30. => Material::Grass,
                                 _ => Material::Sand,
                             }
                         } else {
                             Material::Stone
                         },
                     );
+                }
+
+                if sz < 0 && chunk_height < CHUNK_SIZE {
+                    for z in chunk_height..CHUNK_SIZE {
+                        data.set(
+                            x,
+                            y,
+                            z,
+                            if temp < 0. {
+                                Material::Ice
+                            } else {
+                                Material::Water
+                            },
+                        );
+                    }
                 }
             }
         }

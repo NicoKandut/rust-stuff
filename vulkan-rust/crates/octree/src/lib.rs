@@ -20,53 +20,136 @@ pub type L4Node<T> = Node<Box<[L3Node<T>; 8]>, T>;
 pub type L5Node<T> = Node<Box<[L4Node<T>; 8]>, T>;
 pub type L6Node<T> = Node<Box<[L5Node<T>; 8]>, T>;
 
-impl<T: Copy + PartialEq> L1Node<T> {
-    pub const LEVEL: usize = 1;
-    pub const SIZE: usize = 2;
-    // no shifting and child masking needed, because this is the last level.
-}
-
-impl<T: Copy + PartialEq> L2Node<T> {
-    pub const LEVEL: usize = 2;
-    pub const SIZE: usize = 4;
-    pub const SHIFT: usize = 1;
-    pub const CHILD_MASK: usize = 0b1;
-}
-
-impl<T: Copy + PartialEq> L3Node<T> {
-    pub const LEVEL: usize = 3;
-    pub const SIZE: usize = 8;
-    pub const SHIFT: usize = 2;
-    pub const CHILD_MASK: usize = 0b11;
-}
-
-impl<T: Copy + PartialEq> L4Node<T> {
-    pub const LEVEL: usize = 4;
-    pub const SIZE: usize = 16;
-    pub const SHIFT: usize = 3;
-    pub const CHILD_MASK: usize = 0b111;
-}
-
-impl<T: Copy + PartialEq> L5Node<T> {
-    pub const LEVEL: usize = 5;
-    pub const SIZE: usize = 32;
-    pub const SHIFT: usize = 4;
-    pub const CHILD_MASK: usize = 0b1111;
-}
-
-impl<T: Copy + PartialEq> L6Node<T> {
-    pub const LEVEL: usize = 6;
-    pub const SIZE: usize = 64;
-    pub const SHIFT: usize = 5;
-    pub const CHILD_MASK: usize = 0b11111;
-}
-
 pub trait LeafAccess<T: Copy + PartialEq> {
+    const LEVEL: usize;
+    const SIZE: usize;
+    const SHIFT: usize;
+    const CHILD_MASK: usize;
+
     fn get(&self, x: usize, y: usize, z: usize) -> Option<T>;
     fn set(&mut self, x: usize, y: usize, z: usize, m: T);
 }
 
+macro_rules! impl_leaf_access {
+    ($level:literal, $node:ident, $child:ident) => {
+        impl<T: Copy + PartialEq> LeafAccess<T> for $node<T> {
+            const LEVEL: usize = $level;
+            const SIZE: usize = 1 << $level;
+            const SHIFT: usize = Self::LEVEL - 1;
+            const CHILD_MASK: usize = (1 << Self::SHIFT) - 1;
+
+            fn get(&self, x: usize, y: usize, z: usize) -> Option<T> {
+                debug_assert!(x < Self::SIZE);
+                debug_assert!(y < Self::SIZE);
+                debug_assert!(z < Self::SIZE);
+
+                match self {
+                    Self::Full(data) => Some(*data),
+                    Self::Sparse(children) => {
+                        let i = 0
+                            | ((z >> Self::SHIFT) & 1) << 2
+                            | ((y >> Self::SHIFT) & 1) << 1
+                            | ((x >> Self::SHIFT) & 1) << 0;
+                        debug_assert!(i < 8);
+                        children[i].get(
+                            x & Self::CHILD_MASK,
+                            y & Self::CHILD_MASK,
+                            z & Self::CHILD_MASK,
+                        )
+                    }
+                    Self::Empty => None,
+                }
+            }
+
+            fn set(&mut self, x: usize, y: usize, z: usize, m: T) {
+                debug_assert!(x < Self::SIZE);
+                debug_assert!(y < Self::SIZE);
+                debug_assert!(z < Self::SIZE);
+
+                let i = 0
+                    | ((z >> Self::SHIFT) & 1) << 2
+                    | ((y >> Self::SHIFT) & 1) << 1
+                    | ((x >> Self::SHIFT) & 1) << 0;
+                debug_assert!(i < 8);
+
+                match self {
+                    Self::Full(data) => {
+                        if m != *data {
+                            let mut children = [
+                                $child::Full(*data),
+                                $child::Full(*data),
+                                $child::Full(*data),
+                                $child::Full(*data),
+                                $child::Full(*data),
+                                $child::Full(*data),
+                                $child::Full(*data),
+                                $child::Full(*data),
+                            ];
+
+                            children[i].set(
+                                x & Self::CHILD_MASK,
+                                y & Self::CHILD_MASK,
+                                z & Self::CHILD_MASK,
+                                m,
+                            );
+                            *self = Self::Sparse(Box::new(children))
+                        }
+                    }
+                    Self::Sparse(children) => {
+                        children[i].set(
+                            x & Self::CHILD_MASK,
+                            y & Self::CHILD_MASK,
+                            z & Self::CHILD_MASK,
+                            m,
+                        );
+                        if children.iter().all(|data| match *data {
+                            $child::Full(data) => data == m,
+                            _ => false,
+                        }) {
+                            *self = Self::Full(m);
+                            return;
+                        }
+
+                        // sparse to empty
+                        if children.iter().all(|data| match *data {
+                            $child::Empty => true,
+                            _ => false,
+                        }) {
+                            *self = Self::Empty;
+                        }
+                    }
+                    Self::Empty => {
+                        let mut children = [
+                            $child::Empty,
+                            $child::Empty,
+                            $child::Empty,
+                            $child::Empty,
+                            $child::Empty,
+                            $child::Empty,
+                            $child::Empty,
+                            $child::Empty,
+                        ];
+
+                        children[i].set(
+                            x & Self::CHILD_MASK,
+                            y & Self::CHILD_MASK,
+                            z & Self::CHILD_MASK,
+                            m,
+                        );
+                        *self = Self::Sparse(Box::new(children))
+                    }
+                };
+            }
+        }
+    };
+}
+
 impl<T: Copy + PartialEq> LeafAccess<T> for L1Node<T> {
+    const LEVEL: usize = 1;
+    const SIZE: usize = 2;
+    const SHIFT: usize = 0;
+    const CHILD_MASK: usize = 0;
+
     fn get(&self, x: usize, y: usize, z: usize) -> Option<T> {
         debug_assert!(x < Self::SIZE);
         debug_assert!(y < Self::SIZE);
@@ -74,7 +157,7 @@ impl<T: Copy + PartialEq> LeafAccess<T> for L1Node<T> {
 
         match self {
             Self::Full(data) => Some(*data),
-            Self::Sparse(data) => data[z << 2 | y << 1 | x << 0],
+            Self::Sparse(data) => data[z << 2 | y << 1 | x],
             Self::Empty => None,
         }
     }
@@ -84,7 +167,7 @@ impl<T: Copy + PartialEq> LeafAccess<T> for L1Node<T> {
         debug_assert!(y < Self::SIZE);
         debug_assert!(z < Self::SIZE);
 
-        let i = z << 2 | y << 1 | x << 0;
+        let i = z << 2 | y << 1 | x;
 
         match self {
             Self::Full(material) => {
@@ -99,7 +182,13 @@ impl<T: Copy + PartialEq> LeafAccess<T> for L1Node<T> {
                 data[i] = Some(m);
                 // sparse to full
                 if data.iter().all(|mat| *mat == Some(m)) {
-                    *self = Self::Full(m)
+                    *self = Self::Full(m);
+                    return;
+                }
+
+                // sparse to empty
+                if data.iter().all(|mat| mat.is_none()) {
+                    *self = Self::Empty;
                 }
             }
             Self::Empty => {
@@ -112,484 +201,11 @@ impl<T: Copy + PartialEq> LeafAccess<T> for L1Node<T> {
     }
 }
 
-impl<T: Copy + PartialEq> LeafAccess<T> for L2Node<T> {
-    fn get(&self, x: usize, y: usize, z: usize) -> Option<T> {
-        debug_assert!(x < Self::SIZE);
-        debug_assert!(y < Self::SIZE);
-        debug_assert!(z < Self::SIZE);
-
-        match self {
-            Self::Full(data) => Some(*data),
-            Self::Sparse(children) => {
-                let i = 0
-                    | ((z >> Self::SHIFT) & 1) << 2
-                    | ((y >> Self::SHIFT) & 1) << 1
-                    | ((x >> Self::SHIFT) & 1) << 0;
-                debug_assert!(i < 8);
-                children[i].get(
-                    x & Self::CHILD_MASK,
-                    y & Self::CHILD_MASK,
-                    z & Self::CHILD_MASK,
-                )
-            }
-            Self::Empty => None,
-        }
-    }
-
-    fn set(&mut self, x: usize, y: usize, z: usize, m: T) {
-        debug_assert!(x < Self::SIZE);
-        debug_assert!(y < Self::SIZE);
-        debug_assert!(z < Self::SIZE);
-
-        let i = 0
-            | ((z >> Self::SHIFT) & 1) << 2
-            | ((y >> Self::SHIFT) & 1) << 1
-            | ((x >> Self::SHIFT) & 1) << 0;
-        debug_assert!(i < 8);
-
-        match self {
-            Self::Full(data) => {
-                if m != *data {
-                    let mut children = [
-                        L1Node::Full(*data),
-                        L1Node::Full(*data),
-                        L1Node::Full(*data),
-                        L1Node::Full(*data),
-                        L1Node::Full(*data),
-                        L1Node::Full(*data),
-                        L1Node::Full(*data),
-                        L1Node::Full(*data),
-                    ];
-
-                    children[i].set(
-                        x & Self::CHILD_MASK,
-                        y & Self::CHILD_MASK,
-                        z & Self::CHILD_MASK,
-                        m,
-                    );
-                    *self = Self::Sparse(Box::new(children))
-                }
-            }
-            Self::Sparse(children) => {
-                children[i].set(
-                    x & Self::CHILD_MASK,
-                    y & Self::CHILD_MASK,
-                    z & Self::CHILD_MASK,
-                    m,
-                );
-                if children.iter().all(|data| match *data {
-                    L1Node::Full(data) => data == m,
-                    _ => false,
-                }) {
-                    *self = Self::Full(m)
-                }
-            }
-            Self::Empty => {
-                let mut children = [
-                    L1Node::Empty,
-                    L1Node::Empty,
-                    L1Node::Empty,
-                    L1Node::Empty,
-                    L1Node::Empty,
-                    L1Node::Empty,
-                    L1Node::Empty,
-                    L1Node::Empty,
-                ];
-
-                children[i].set(
-                    x & Self::CHILD_MASK,
-                    y & Self::CHILD_MASK,
-                    z & Self::CHILD_MASK,
-                    m,
-                );
-                *self = Self::Sparse(Box::new(children))
-            }
-        };
-    }
-}
-
-impl<T: Copy + PartialEq> LeafAccess<T> for L3Node<T> {
-    fn get(&self, x: usize, y: usize, z: usize) -> Option<T> {
-        debug_assert!(x < Self::SIZE);
-        debug_assert!(y < Self::SIZE);
-        debug_assert!(z < Self::SIZE);
-
-        match self {
-            Self::Full(data) => Some(*data),
-            Self::Sparse(children) => {
-                let i = 0
-                    | ((z >> Self::SHIFT) & 1) << 2
-                    | ((y >> Self::SHIFT) & 1) << 1
-                    | ((x >> Self::SHIFT) & 1) << 0;
-                debug_assert!(i < 8);
-                children[i].get(
-                    x & Self::CHILD_MASK,
-                    y & Self::CHILD_MASK,
-                    z & Self::CHILD_MASK,
-                )
-            }
-            Self::Empty => None,
-        }
-    }
-
-    fn set(&mut self, x: usize, y: usize, z: usize, m: T) {
-        debug_assert!(x < Self::SIZE);
-        debug_assert!(y < Self::SIZE);
-        debug_assert!(z < Self::SIZE);
-
-        let i = 0
-            | ((z >> Self::SHIFT) & 1) << 2
-            | ((y >> Self::SHIFT) & 1) << 1
-            | ((x >> Self::SHIFT) & 1) << 0;
-        debug_assert!(i < 8);
-
-        match self {
-            Self::Full(data) => {
-                if m != *data {
-                    let mut children = [
-                        L2Node::Full(*data),
-                        L2Node::Full(*data),
-                        L2Node::Full(*data),
-                        L2Node::Full(*data),
-                        L2Node::Full(*data),
-                        L2Node::Full(*data),
-                        L2Node::Full(*data),
-                        L2Node::Full(*data),
-                    ];
-
-                    children[i].set(
-                        x & Self::CHILD_MASK,
-                        y & Self::CHILD_MASK,
-                        z & Self::CHILD_MASK,
-                        m,
-                    );
-                    *self = Self::Sparse(Box::new(children))
-                }
-            }
-            Self::Sparse(children) => {
-                children[i].set(
-                    x & Self::CHILD_MASK,
-                    y & Self::CHILD_MASK,
-                    z & Self::CHILD_MASK,
-                    m,
-                );
-                if children.iter().all(|data| match *data {
-                    L2Node::Full(data) => data == m,
-                    _ => false,
-                }) {
-                    *self = Self::Full(m)
-                }
-            }
-            Self::Empty => {
-                let mut children = [
-                    L2Node::Empty,
-                    L2Node::Empty,
-                    L2Node::Empty,
-                    L2Node::Empty,
-                    L2Node::Empty,
-                    L2Node::Empty,
-                    L2Node::Empty,
-                    L2Node::Empty,
-                ];
-
-                children[i].set(
-                    x & Self::CHILD_MASK,
-                    y & Self::CHILD_MASK,
-                    z & Self::CHILD_MASK,
-                    m,
-                );
-                *self = Self::Sparse(Box::new(children))
-            }
-        };
-    }
-}
-
-impl<T: Copy + PartialEq> LeafAccess<T> for L4Node<T> {
-    fn get(&self, x: usize, y: usize, z: usize) -> Option<T> {
-        debug_assert!(x < Self::SIZE);
-        debug_assert!(y < Self::SIZE);
-        debug_assert!(z < Self::SIZE);
-
-        match self {
-            Self::Full(data) => Some(*data),
-            Self::Sparse(children) => {
-                let i = 0
-                    | ((z >> Self::SHIFT) & 1) << 2
-                    | ((y >> Self::SHIFT) & 1) << 1
-                    | ((x >> Self::SHIFT) & 1) << 0;
-                debug_assert!(i < 8);
-                children[i].get(
-                    x & Self::CHILD_MASK,
-                    y & Self::CHILD_MASK,
-                    z & Self::CHILD_MASK,
-                )
-            }
-            Self::Empty => None,
-        }
-    }
-
-    fn set(&mut self, x: usize, y: usize, z: usize, m: T) {
-        debug_assert!(x < Self::SIZE);
-        debug_assert!(y < Self::SIZE);
-        debug_assert!(z < Self::SIZE);
-
-        let i = 0
-            | ((z >> Self::SHIFT) & 1) << 2
-            | ((y >> Self::SHIFT) & 1) << 1
-            | ((x >> Self::SHIFT) & 1) << 0;
-        debug_assert!(i < 8);
-
-        match self {
-            Self::Full(data) => {
-                if m != *data {
-                    let mut children = [
-                        L3Node::Full(*data),
-                        L3Node::Full(*data),
-                        L3Node::Full(*data),
-                        L3Node::Full(*data),
-                        L3Node::Full(*data),
-                        L3Node::Full(*data),
-                        L3Node::Full(*data),
-                        L3Node::Full(*data),
-                    ];
-
-                    children[i].set(
-                        x & Self::CHILD_MASK,
-                        y & Self::CHILD_MASK,
-                        z & Self::CHILD_MASK,
-                        m,
-                    );
-                    *self = Self::Sparse(Box::new(children))
-                }
-            }
-            Self::Sparse(children) => {
-                children[i].set(
-                    x & Self::CHILD_MASK,
-                    y & Self::CHILD_MASK,
-                    z & Self::CHILD_MASK,
-                    m,
-                );
-                if children.iter().all(|data| match *data {
-                    L3Node::Full(data) => data == m,
-                    _ => false,
-                }) {
-                    *self = Self::Full(m)
-                }
-            }
-            Self::Empty => {
-                let mut children = [
-                    L3Node::Empty,
-                    L3Node::Empty,
-                    L3Node::Empty,
-                    L3Node::Empty,
-                    L3Node::Empty,
-                    L3Node::Empty,
-                    L3Node::Empty,
-                    L3Node::Empty,
-                ];
-
-                children[i].set(
-                    x & Self::CHILD_MASK,
-                    y & Self::CHILD_MASK,
-                    z & Self::CHILD_MASK,
-                    m,
-                );
-                *self = Self::Sparse(Box::new(children))
-            }
-        };
-    }
-}
-
-impl<T: Copy + PartialEq> LeafAccess<T> for L5Node<T> {
-    fn get(&self, x: usize, y: usize, z: usize) -> Option<T> {
-        debug_assert!(x < Self::SIZE);
-        debug_assert!(y < Self::SIZE);
-        debug_assert!(z < Self::SIZE);
-
-        match self {
-            Self::Full(data) => Some(*data),
-            Self::Sparse(children) => {
-                let i = 0
-                    | ((z >> Self::SHIFT) & 1) << 2
-                    | ((y >> Self::SHIFT) & 1) << 1
-                    | ((x >> Self::SHIFT) & 1) << 0;
-                debug_assert!(i < 8);
-                children[i].get(
-                    x & Self::CHILD_MASK,
-                    y & Self::CHILD_MASK,
-                    z & Self::CHILD_MASK,
-                )
-            }
-            Self::Empty => None,
-        }
-    }
-
-    fn set(&mut self, x: usize, y: usize, z: usize, m: T) {
-        debug_assert!(x < Self::SIZE);
-        debug_assert!(y < Self::SIZE);
-        debug_assert!(z < Self::SIZE);
-
-        let i = 0
-            | ((z >> Self::SHIFT) & 1) << 2
-            | ((y >> Self::SHIFT) & 1) << 1
-            | ((x >> Self::SHIFT) & 1) << 0;
-        debug_assert!(i < 8);
-
-        match self {
-            Self::Full(data) => {
-                if m != *data {
-                    let mut children = [
-                        L4Node::Full(*data),
-                        L4Node::Full(*data),
-                        L4Node::Full(*data),
-                        L4Node::Full(*data),
-                        L4Node::Full(*data),
-                        L4Node::Full(*data),
-                        L4Node::Full(*data),
-                        L4Node::Full(*data),
-                    ];
-
-                    children[i].set(
-                        x & Self::CHILD_MASK,
-                        y & Self::CHILD_MASK,
-                        z & Self::CHILD_MASK,
-                        m,
-                    );
-                    *self = Self::Sparse(Box::new(children))
-                }
-            }
-            Self::Sparse(children) => {
-                children[i].set(
-                    x & Self::CHILD_MASK,
-                    y & Self::CHILD_MASK,
-                    z & Self::CHILD_MASK,
-                    m,
-                );
-                if children.iter().all(|data| match *data {
-                    L4Node::Full(data) => data == m,
-                    _ => false,
-                }) {
-                    *self = Self::Full(m)
-                }
-            }
-            Self::Empty => {
-                let mut children = [
-                    L4Node::Empty,
-                    L4Node::Empty,
-                    L4Node::Empty,
-                    L4Node::Empty,
-                    L4Node::Empty,
-                    L4Node::Empty,
-                    L4Node::Empty,
-                    L4Node::Empty,
-                ];
-
-                children[i].set(
-                    x & Self::CHILD_MASK,
-                    y & Self::CHILD_MASK,
-                    z & Self::CHILD_MASK,
-                    m,
-                );
-                *self = Self::Sparse(Box::new(children))
-            }
-        };
-    }
-}
-
-impl<T: Copy + PartialEq> LeafAccess<T> for L6Node<T> {
-    fn get(&self, x: usize, y: usize, z: usize) -> Option<T> {
-        debug_assert!(x < Self::SIZE);
-        debug_assert!(y < Self::SIZE);
-        debug_assert!(z < Self::SIZE);
-
-        match self {
-            Self::Full(data) => Some(*data),
-            Self::Sparse(children) => {
-                let i = 0
-                    | ((z >> Self::SHIFT) & 1) << 2
-                    | ((y >> Self::SHIFT) & 1) << 1
-                    | ((x >> Self::SHIFT) & 1) << 0;
-                debug_assert!(i < 8);
-                children[i].get(
-                    x & Self::CHILD_MASK,
-                    y & Self::CHILD_MASK,
-                    z & Self::CHILD_MASK,
-                )
-            }
-            Self::Empty => None,
-        }
-    }
-
-    fn set(&mut self, x: usize, y: usize, z: usize, m: T) {
-        debug_assert!(x < Self::SIZE);
-        debug_assert!(y < Self::SIZE);
-        debug_assert!(z < Self::SIZE);
-
-        let i = 0
-            | ((z >> Self::SHIFT) & 1) << 2
-            | ((y >> Self::SHIFT) & 1) << 1
-            | ((x >> Self::SHIFT) & 1) << 0;
-        debug_assert!(i < 8);
-
-        match self {
-            Self::Full(data) => {
-                if m != *data {
-                    let mut children = [
-                        L5Node::Full(*data),
-                        L5Node::Full(*data),
-                        L5Node::Full(*data),
-                        L5Node::Full(*data),
-                        L5Node::Full(*data),
-                        L5Node::Full(*data),
-                        L5Node::Full(*data),
-                        L5Node::Full(*data),
-                    ];
-                    children[i].set(
-                        x & Self::CHILD_MASK,
-                        y & Self::CHILD_MASK,
-                        z & Self::CHILD_MASK,
-                        m,
-                    );
-                    *self = Self::Sparse(Box::new(children))
-                }
-            }
-            Self::Sparse(children) => {
-                children[i].set(
-                    x & Self::CHILD_MASK,
-                    y & Self::CHILD_MASK,
-                    z & Self::CHILD_MASK,
-                    m,
-                );
-                if children.iter().all(|data| match *data {
-                    L5Node::Full(data) => data == m,
-                    _ => false,
-                }) {
-                    *self = Self::Full(m)
-                }
-            }
-            Self::Empty => {
-                let mut children = [
-                    L5Node::Empty,
-                    L5Node::Empty,
-                    L5Node::Empty,
-                    L5Node::Empty,
-                    L5Node::Empty,
-                    L5Node::Empty,
-                    L5Node::Empty,
-                    L5Node::Empty,
-                ];
-
-                children[i].set(
-                    x & Self::CHILD_MASK,
-                    y & Self::CHILD_MASK,
-                    z & Self::CHILD_MASK,
-                    m,
-                );
-                *self = Self::Sparse(Box::new(children))
-            }
-        };
-    }
-}
+impl_leaf_access!(2, L2Node, L1Node);
+impl_leaf_access!(3, L3Node, L2Node);
+impl_leaf_access!(4, L4Node, L3Node);
+impl_leaf_access!(5, L5Node, L4Node);
+impl_leaf_access!(6, L6Node, L5Node);
 
 #[cfg(test)]
 mod tests {

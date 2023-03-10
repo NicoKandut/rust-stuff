@@ -1,4 +1,4 @@
-use graphics::Mesh;
+use graphics::{Mesh, AABB};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::{Add, AddAssign},
@@ -18,21 +18,6 @@ impl ChunkId {
         let diff = [lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z];
 
         diff[0].pow(2) + diff[1].pow(2) + diff[2].pow(2)
-    }
-
-    pub fn aabb(&self) -> (glm::Vec3, glm::Vec3) {
-        let min = glm::vec3(
-            (self.x * CHUNK_SIZE as i32) as f32,
-            (self.y * CHUNK_SIZE as i32) as f32,
-            (self.z * CHUNK_SIZE as i32) as f32,
-        );
-        let max = glm::vec3(
-            min.x + CHUNK_SIZE as f32,
-            min.y + CHUNK_SIZE as f32,
-            min.z + CHUNK_SIZE as f32,
-        );
-
-        (min, max)
     }
 }
 
@@ -76,6 +61,23 @@ impl AddAssign<i32> for WorldPosition {
 impl ChunkId {
     pub fn new(x: i32, y: i32, z: i32) -> Self {
         Self { x, y, z }
+    }
+}
+
+impl From<&ChunkId> for AABB {
+    fn from(id: &ChunkId) -> Self {
+        let min = glm::vec3(
+            (id.x * CHUNK_SIZE as i32) as f32,
+            (id.y * CHUNK_SIZE as i32) as f32,
+            (id.z * CHUNK_SIZE as i32) as f32,
+        );
+        let max = glm::vec3(
+            min.x + CHUNK_SIZE as f32,
+            min.y + CHUNK_SIZE as f32,
+            min.z + CHUNK_SIZE as f32,
+        );
+
+        AABB::new(min, max)
     }
 }
 

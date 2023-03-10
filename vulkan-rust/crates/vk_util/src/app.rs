@@ -17,7 +17,7 @@ use crate::{
     uinform::{create_descriptor_set_layout, create_uniform_buffers, UniformBufferObject},
 };
 use anyhow::{anyhow, Result};
-use graphics::{camera::FlyingCamera, frustum::Frustum};
+use graphics::{camera::FlyingCamera, Frustum};
 use std::{mem::size_of, ptr::copy_nonoverlapping as memcpy, time::Instant};
 use vulkanalia::{
     loader::{LibloadingLoader, LIBRARY},
@@ -224,7 +224,7 @@ impl App {
             .meshes
             .iter()
             .filter_map(|(id, mesh)| {
-                if frustum.intersects_chunk(id.aabb()) {
+                if frustum.intersects_aabb(&id.into()) {
                     Some(self.update_secondary_command_buffer(image_index, id, mesh.indices.len()))
                 } else {
                     None

@@ -1,3 +1,5 @@
+use crate::aabb::AABB;
+
 pub struct Frustum {
     planes: [glm::Vec4; 4],
     points: [glm::Vec3; 8],
@@ -21,8 +23,8 @@ impl Frustum {
         }
     }
 
-    pub fn intersects_chunk(&self, aabb: (glm::Vec3, glm::Vec3)) -> bool {
-        let (min, max) = aabb;
+    pub fn intersects_aabb(&self, aabb: &AABB) -> bool {
+        let AABB { min, max } = aabb;
 
         // check box outside/inside of frustum
         for plane in &self.planes {
