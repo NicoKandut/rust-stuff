@@ -18,8 +18,8 @@ tobj = "2"
 vulkanalia = { version = "=0.14.0", features = ["libloading", "window"] }
 winit = "0.24"
 gamedata = {path = "../gamedata", version = "0.0.0"}
-octree = {path = "../octree", version = "0.0.0"}
 world = {path = "../world", version = "0.0.0"}
 graphics = {path = "../graphics", version = "0.0.0"}
+vk_util = {path = "../vk_util", version = "0.0.0"}
 simdnoise = "3.1.6"
 rayon = "1.6.1"

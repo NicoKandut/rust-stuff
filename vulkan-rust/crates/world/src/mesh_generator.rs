@@ -4,8 +4,7 @@ use std::os::windows::prelude::MetadataExt;
 
 use crate::{
     chunk_manager::{ChunkId, WorldPosition},
-    fixed_tree::ChunkData,
-    CHUNK_SIZE,
+    ChunkData, CHUNK_SIZE,
 };
 use gamedata::material::Material;
 use nalgebra_glm as glm;
@@ -14,16 +13,13 @@ use graphics::{Mesh, Vertex};
 
 const CS: usize = CHUNK_SIZE;
 
-pub fn generate_greedy_mesh(id: &ChunkId, data: &ChunkData, first_vertex: u32) -> Mesh {
-    let mut vertices = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
-
-    let world_pos = WorldPosition::from(id.clone());
+pub fn generate_greedy_mesh(id: &ChunkId, data: &ChunkData) -> Mesh {
+    let mut mesh = Mesh::default();
+    let mut vertex_count = 0;
 
     // on each axis
     // from (x,y,z) to (d,u,v)
     for d0 in 0..3 {
-        // println!("Dir: {}", d0);
         let d = d0 % 3;
         let u = (d0 + 1) % 3;
         let v = (d0 + 2) % 3;
@@ -115,34 +111,24 @@ pub fn generate_greedy_mesh(id: &ChunkId, data: &ChunkData, first_vertex: u32) -
                     normal[d] = 1 - 2 * (orientation as i32);
                     let normal = glm::vec3(normal[0] as f32, normal[1] as f32, normal[2] as f32);
 
-                    let i0 = first_vertex + vertices.len() as u32;
-                    indices.extend(if orientation {
+                    let i0 = vertex_count as u32;
+
+                    mesh.indices.extend(if orientation {
                         [i0 + 0, i0 + 3, i0 + 1, i0 + 0, i0 + 2, i0 + 3]
                     } else {
                         [i0 + 0, i0 + 1, i0 + 3, i0 + 0, i0 + 3, i0 + 2]
                     });
 
-                    let global_start = [
-                        world_pos.x + start[0] as i32,
-                        world_pos.y + start[1] as i32,
-                        world_pos.z + start[2] as i32,
-                    ];
-                    let global_end = [
-                        world_pos.x + end[0] as i32,
-                        world_pos.y + end[1] as i32,
-                        world_pos.z + end[2] as i32,
-                    ];
-
-                    let ss = global_start;
-                    let mut se = global_start;
-                    se[u] = global_end[u];
-                    let mut es = global_start;
-                    es[v] = global_end[v];
-                    let ee = global_end;
+                    let ss = start;
+                    let mut se = start;
+                    se[u] = end[u];
+                    let mut es = start;
+                    es[v] = end[v];
+                    let ee = end;
 
                     let c: glm::Vec3 = m.color().into();
 
-                    vertices.extend([
+                    mesh.vertices.extend([
                         Vertex::new(
                             glm::vec3(ss[0] as f32, ss[1] as f32, ss[2] as f32),
                             c,
@@ -164,6 +150,7 @@ pub fn generate_greedy_mesh(id: &ChunkId, data: &ChunkData, first_vertex: u32) -
                             normal,
                         ),
                     ]);
+                    vertex_count += 4;
 
                     for vm in start[v]..end[v] {
                         for um in start[u]..end[u] {
@@ -179,9 +166,7 @@ pub fn generate_greedy_mesh(id: &ChunkId, data: &ChunkData, first_vertex: u32) -
         }
     }
 
-    // println!("Meshing: vOffset: {first_vertex}, vLen: {}", vertices.len());
-
-    Mesh { vertices, indices }
+    mesh
 }
 
 #[cfg(test)]
@@ -196,10 +181,9 @@ mod test {
     fn single_chunk_meshing17(b: &mut Bencher) {
         let id = ChunkId::new(17, 17, 17);
         let data = ChunkGenerator::new().generate(&id);
-        let first_vertex = 16;
 
         b.iter(|| {
-            test::black_box(generate_greedy_mesh(&id, &data, first_vertex));
+            test::black_box(generate_greedy_mesh(&id, &data));
         });
     }
 
@@ -207,10 +191,9 @@ mod test {
     fn single_chunk_meshing0(b: &mut Bencher) {
         let id = ChunkId::new(0, 0, 0);
         let data = ChunkGenerator::new().generate(&id);
-        let first_vertex = 0;
 
         b.iter(|| {
-            test::black_box(generate_greedy_mesh(&id, &data, first_vertex));
+            test::black_box(generate_greedy_mesh(&id, &data));
         });
     }
 }

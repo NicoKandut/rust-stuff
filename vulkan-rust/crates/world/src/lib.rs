@@ -1,19 +1,21 @@
 #![feature(test)]
 
+extern crate nalgebra_glm as glm;
 extern crate test;
 
 pub mod chunk_generator;
 pub mod chunk_manager;
-pub mod fixed_tree;
 pub mod mesh_generator;
 pub mod terrain_noise;
 
+use std::collections::BTreeSet;
+
 use chunk_generator::ChunkGenerator;
 use chunk_manager::{ChunkId, ChunkManager};
-use fixed_tree::{ChunkData, VoxelData6};
 use gamedata::material::Material;
+use octree::{L6Node, LeafAccess};
 
-pub const CHUNK_SIZE: usize = VoxelData6::SIZE;
+pub const CHUNK_SIZE: usize = L6Node::<Material>::SIZE;
 pub const CHUNK_SIZE_SQUARED: usize = CHUNK_SIZE * CHUNK_SIZE;
 pub const CHUNK_SIZE_CUBED: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
 
@@ -34,6 +36,10 @@ impl World {
             generator: ChunkGenerator::new(),
             manager: ChunkManager::new(),
         }
+    }
+
+    pub fn ids(&self) -> &BTreeSet<ChunkId> {
+        self.manager.ids()
     }
 
     pub fn get_chunks(&self) -> Vec<(&ChunkId, &Box<ChunkData>)> {
@@ -58,7 +64,7 @@ impl World {
             ((p[2] - id.z as f32) as usize + CHUNK_SIZE) % CHUNK_SIZE,
         ];
 
-        if let Some(chunk) = self.manager.get(&id) {
+        if let Some(chunk) = self.manager.get_data(&id) {
             if let Some(material) = chunk.get(pos[0], pos[1], pos[2]) {
                 material.is_solid()
             } else {
@@ -66,6 +72,42 @@ impl World {
             }
         } else {
             false
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct ChunkData(L6Node<Material>);
+
+impl ChunkData {
+    pub fn default() -> Self {
+        Self(L6Node::Empty)
+    }
+
+    pub fn get(&self, x: usize, y: usize, z: usize) -> Option<Material> {
+        if x >= CHUNK_SIZE || y >= CHUNK_SIZE || z >= CHUNK_SIZE {
+            None // todo remove
+        } else {
+            self.0.get(x, y, z)
+        }
+    }
+
+    pub fn set(&mut self, x: usize, y: usize, z: usize, m: Material) {
+        self.0.set(x, y, z, m)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self(L6Node::Empty) => true,
+            _ => false,
+        }
+    }
+
+    pub fn needs_mesh(&self) -> bool {
+        match self {
+            Self(L6Node::<Material>::Empty) => false,
+            Self(L6Node::<Material>::Full(m)) => !m.is_opaque(),
+            _ => true,
         }
     }
 }

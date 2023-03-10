@@ -9,5 +9,7 @@ edition = "2021"
 nalgebra-glm = "0.10"
 rand = "0.8.5"
 simdnoise = "3.1.6"
-gamedata = {path = "../gamedata", version = "0.0.0"}
-graphics = {path = "../graphics", version = "0.0.0"}
+gamedata = {path = "../gamedata"}
+graphics = {path = "../graphics"}
+octree = {path = "../octree"}
+bitvec = "1.0.1"

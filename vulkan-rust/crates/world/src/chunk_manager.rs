@@ -1,16 +1,39 @@
 use graphics::Mesh;
-
-use crate::{fixed_tree::ChunkData, CHUNK_SIZE};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     ops::{Add, AddAssign},
 };
+
+use crate::{ChunkData, CHUNK_SIZE};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ChunkId {
     pub x: i32,
     pub y: i32,
     pub z: i32,
+}
+
+impl ChunkId {
+    pub fn dist2(lhs: &ChunkId, rhs: &ChunkId) -> i32 {
+        let diff = [lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z];
+
+        diff[0].pow(2) + diff[1].pow(2) + diff[2].pow(2)
+    }
+
+    pub fn aabb(&self) -> (glm::Vec3, glm::Vec3) {
+        let min = glm::vec3(
+            (self.x * CHUNK_SIZE as i32) as f32,
+            (self.y * CHUNK_SIZE as i32) as f32,
+            (self.z * CHUNK_SIZE as i32) as f32,
+        );
+        let max = glm::vec3(
+            min.x + CHUNK_SIZE as f32,
+            min.y + CHUNK_SIZE as f32,
+            min.z + CHUNK_SIZE as f32,
+        );
+
+        (min, max)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -67,13 +90,15 @@ impl From<ChunkId> for WorldPosition {
 }
 
 pub struct ChunkManager {
-    chunks: BTreeMap<ChunkId, Box<ChunkData>>,
-    meshes: BTreeMap<ChunkId, Box<Mesh>>,
+    pub ids: BTreeSet<ChunkId>,
+    pub chunks: BTreeMap<ChunkId, Box<ChunkData>>,
+    pub meshes: BTreeMap<ChunkId, Box<Mesh>>,
 }
 
 impl ChunkManager {
     pub fn new() -> Self {
         Self {
+            ids: BTreeSet::new(),
             chunks: BTreeMap::new(),
             meshes: BTreeMap::new(),
         }
@@ -91,9 +116,16 @@ impl ChunkManager {
         self.meshes.insert(id.clone(), Box::new(mesh));
     }
 
-    pub fn get(&self, id: &ChunkId) -> Option<&ChunkData> {
+    pub fn get_data(&self, id: &ChunkId) -> Option<&ChunkData> {
         match self.chunks.get(id) {
             Some(chunk_box) => Some(chunk_box),
+            None => None,
+        }
+    }
+
+    pub fn get_mesh(&self, id: &ChunkId) -> Option<&Mesh> {
+        match self.meshes.get(id) {
+            Some(mesh) => Some(mesh),
             None => None,
         }
     }
@@ -105,6 +137,10 @@ impl ChunkManager {
         }
     }
 
+    pub fn ids(&self) -> &BTreeSet<ChunkId> {
+        &self.ids
+    }
+
     pub(crate) fn get_all(&self) -> Vec<(&ChunkId, &Box<ChunkData>)> {
         self.chunks.iter().filter(|c| !c.1.is_empty()).collect()
     }
@@ -112,11 +148,9 @@ impl ChunkManager {
 
 #[cfg(test)]
 mod test {
-    use gamedata::material::Material;
-
-    use crate::fixed_tree::ChunkData;
-
     use super::{ChunkId, ChunkManager};
+    use crate::ChunkData;
+    use gamedata::material::Material;
 
     #[test]
     fn insert() {
@@ -130,11 +164,11 @@ mod test {
         let mut cm = ChunkManager::new();
         let id = ChunkId::new(0, 0, 0);
         cm.insert_data(&id, ChunkData::default());
-        let chunk = cm.get(&id);
+        let chunk = cm.get_data(&id);
         assert!(chunk.is_some());
 
         let id2 = ChunkId::new(0, 1, 0);
-        let chunk = cm.get(&id2);
+        let chunk = cm.get_data(&id2);
         assert!(chunk.is_none());
     }
 

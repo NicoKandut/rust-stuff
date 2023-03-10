@@ -1,17 +1,16 @@
 use super::{System, TimeBasedSystem};
-use gamedata::vector::Vec3;
 use std::time::Duration;
 use world::World;
 
 #[derive(Default, Debug)]
 pub struct EntityPhysics {
     pub id: u64,
-    pub acceleration: Vec3,
-    pub velocity: Vec3,
-    pub position: Vec3,
+    pub acceleration: glm::Vec3,
+    pub velocity: glm::Vec3,
+    pub position: glm::Vec3,
     pub affected_by_gravity: bool,
-    pub rotation: Vec3,
-    pub half_size: Vec3,
+    pub rotation: glm::Vec3,
+    pub half_size: glm::Vec3,
 }
 
 pub struct PhysicsSystem {

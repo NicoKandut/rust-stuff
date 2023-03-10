@@ -1,7 +1,12 @@
-use nalgebra_glm as glm;
+extern crate nalgebra_glm as glm;
+
 use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 use vulkanalia::vk::{self, HasBuilder};
+
+pub mod camera;
+pub mod frustum;
+mod input;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
@@ -70,15 +75,19 @@ impl Hash for Vertex {
     }
 }
 
+#[derive(Clone)]
 pub struct Mesh {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
 }
 
-impl Mesh {
-    pub fn new(vertices: Vec<Vertex>, indices: Vec<u32>) -> Self {
-        Self { vertices, indices }
+impl Default for Mesh {
+    fn default() -> Self {
+        Self {
+            vertices: Default::default(),
+            indices: Default::default(),
+        }
     }
-
-    pub fn new_buffered() {}
 }
+
+pub struct MeshWithBuffer {}

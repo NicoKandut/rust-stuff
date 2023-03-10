@@ -1,7 +1,6 @@
 use crate::{
     chunk_manager::{ChunkId, WorldPosition},
-    fixed_tree::ChunkData,
-    terrain_noise, CHUNK_SIZE,
+    terrain_noise, ChunkData, CHUNK_SIZE,
 };
 use gamedata::material::Material;
 
@@ -21,15 +20,17 @@ impl ChunkGenerator {
         let mut data = ChunkData::default();
 
         let mut voxel_pos = WorldPosition::new(sx, sy, sz);
-        let noise = terrain_noise::composite_3d(&voxel_pos);
-        let mut noise_iter = noise.iter();
+        let height_noise = terrain_noise::composite_3d(&voxel_pos);
+        let temp_noise = terrain_noise::temperature(&voxel_pos);
+
+        let mut noise_iter = height_noise.iter().zip(temp_noise);
 
         for y in 0..CHUNK_SIZE {
             voxel_pos.y = sy + y as i32;
             for x in 0..CHUNK_SIZE {
                 voxel_pos.x = sx + x as i32;
-                let (bh, r) = noise_iter.next().unwrap().to_owned();
-                let world_height = (20. + (50. * bh) + (10. * r)) as i32;
+                let ((bh, _r), temp) = noise_iter.next().unwrap().to_owned();
+                let world_height = (1. * bh) as i32;
 
                 let chunk_height = (world_height - sz).clamp(0, CHUNK_SIZE as i32) as usize;
 
@@ -38,8 +39,12 @@ impl ChunkGenerator {
                         x,
                         y,
                         z,
-                        if z == chunk_height - 1 {
-                            Material::Grass
+                        if sz + z as i32 == world_height - 1 {
+                            match temp {
+                                x if x < -0.1 => Material::Snow,
+                                x if x < 0.1 => Material::Grass,
+                                _ => Material::Sand,
+                            }
                         } else {
                             Material::Stone
                         },

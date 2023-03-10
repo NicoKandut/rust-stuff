@@ -1,8 +1,8 @@
-use graphics::Vertex;
-use crate::AppData;
 use anyhow::Result;
+use graphics::Vertex;
 use nalgebra_glm as glm;
 use std::{collections::HashMap, fs::File, io::BufReader};
+use vk_util::appdata::AppData;
 
 pub fn load_model(data: &mut AppData) -> Result<()> {
     let mut reader = BufReader::new(File::open(
