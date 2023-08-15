@@ -2,6 +2,8 @@
 
 extern crate test;
 
+mod next;
+
 /**
  * Generic node in an octree
  */

@@ -58,14 +58,18 @@ impl World {
             p[2] as i32 / CHUNK_SIZE as i32,
         );
 
-        let pos = [
-            ((p[0] - id.x as f32) as usize + CHUNK_SIZE) % CHUNK_SIZE,
-            ((p[1] - id.y as f32) as usize + CHUNK_SIZE) % CHUNK_SIZE,
-            ((p[2] - id.z as f32) as usize + CHUNK_SIZE) % CHUNK_SIZE,
+        let position_in_chunk = [
+            (p[0] as i32 % CHUNK_SIZE as i32) as usize,
+            (p[1] as i32 % CHUNK_SIZE as i32) as usize,
+            (p[2] as i32 % CHUNK_SIZE as i32) as usize,
         ];
 
         if let Some(chunk) = self.manager.get_data(&id) {
-            if let Some(material) = chunk.get(pos[0], pos[1], pos[2]) {
+            if let Some(material) = chunk.get(
+                position_in_chunk[0],
+                position_in_chunk[1],
+                position_in_chunk[2],
+            ) {
                 material.is_solid()
             } else {
                 false

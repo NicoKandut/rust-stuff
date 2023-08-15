@@ -2,14 +2,15 @@
 
 use std::os::windows::prelude::MetadataExt;
 
+use nalgebra_glm as glm;
+
+use gamedata::material::Material;
+use graphics::{Mesh, Vertex};
+
 use crate::{
     chunk_manager::{ChunkId, WorldPosition},
     ChunkData, CHUNK_SIZE,
 };
-use gamedata::material::Material;
-use nalgebra_glm as glm;
-
-use graphics::{Mesh, Vertex};
 
 const CS: usize = CHUNK_SIZE;
 
@@ -38,10 +39,14 @@ pub fn generate_greedy_mesh(id: &ChunkId, data: &ChunkData) -> Mesh {
             while x[v] < CS {
                 x[u] = 0;
                 while x[u] < CS {
-                    x2 = x;
-                    x2[d] -= 1;
                     let cur_mat = data.get(x[0], x[1], x[2]);
-                    let next_mat = data.get(x2[0], x2[1], x2[2]);
+                    let next_mat = if x[d] == 0 {
+                        None // outside of chunk
+                    } else {
+                        x2 = x;
+                        x2[d] -= 1;
+                        data.get(x2[0], x2[1], x2[2])
+                    };
 
                     let face_type_c = match (cur_mat, next_mat) {
                         (None, None) => None,
@@ -128,28 +133,16 @@ pub fn generate_greedy_mesh(id: &ChunkId, data: &ChunkData) -> Mesh {
 
                     let c: glm::Vec3 = m.color().into();
 
-                    mesh.vertices.extend([
-                        Vertex::new(
-                            glm::vec3(ss[0] as f32, ss[1] as f32, ss[2] as f32),
-                            c,
-                            normal,
-                        ),
-                        Vertex::new(
-                            glm::vec3(se[0] as f32, se[1] as f32, se[2] as f32),
-                            c,
-                            normal,
-                        ),
-                        Vertex::new(
-                            glm::vec3(es[0] as f32, es[1] as f32, es[2] as f32),
-                            c,
-                            normal,
-                        ),
-                        Vertex::new(
-                            glm::vec3(ee[0] as f32, ee[1] as f32, ee[2] as f32),
-                            c,
-                            normal,
-                        ),
-                    ]);
+                    let vertices = [
+                        [ss[0] as f32, ss[1] as f32, ss[2] as f32],
+                        [se[0] as f32, se[1] as f32, se[2] as f32],
+                        [es[0] as f32, es[1] as f32, es[2] as f32],
+                        [ee[0] as f32, ee[1] as f32, ee[2] as f32],
+                    ]
+                    .map(|position| glm::vec3(position[0], position[1], position[2]))
+                    .map(|position| Vertex::new(position, c, normal));
+
+                    mesh.vertices.extend(vertices);
                     vertex_count += 4;
 
                     for vm in start[v]..end[v] {
@@ -157,11 +150,9 @@ pub fn generate_greedy_mesh(id: &ChunkId, data: &ChunkData) -> Mesh {
                             mask[vm * CS + um] = None;
                         }
                     }
-
                     n += 1;
                 }
             }
-
             x[d] += 1;
         }
     }
@@ -173,9 +164,30 @@ pub fn generate_greedy_mesh(id: &ChunkId, data: &ChunkData) -> Mesh {
 mod test {
     use test::Bencher;
 
-    use crate::{chunk_generator::ChunkGenerator, chunk_manager::ChunkId};
+    use gamedata::material::Material;
+
+    use crate::{chunk_generator::ChunkGenerator, chunk_manager::ChunkId, ChunkData};
 
     use super::generate_greedy_mesh;
+
+    #[test]
+    fn empty() {
+        let id = ChunkId::new(17, 17, 17);
+        let mut data = ChunkData::default();
+        let mesh = generate_greedy_mesh(&id, &data);
+        assert_eq!(mesh.vertices.len(), 0);
+        assert_eq!(mesh.indices.len(), 0);
+    }
+
+    #[test]
+    fn single_block() {
+        let id = ChunkId::new(17, 17, 17);
+        let mut data = ChunkData::default();
+        data.set(0, 0, 0, Material::Stone);
+        let mesh = generate_greedy_mesh(&id, &data);
+        assert_eq!(mesh.vertices.len(), 24);
+        assert_eq!(mesh.indices.len(), 36);
+    }
 
     #[bench]
     fn single_chunk_meshing17(b: &mut Bencher) {

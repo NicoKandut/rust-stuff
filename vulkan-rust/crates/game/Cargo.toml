@@ -19,11 +19,3 @@ vulkanalia = { version = "=0.14.0", features = ["libloading", "window"] }
 winit = "0.24"
 engine = { path = "../engine", version = "0.0.0" }
 gamedata = { path = "../gamedata", version = "0.0.0" }
-dhat = "0.3.2"
-
-[profile.release]
-debug = 1
-
-[features]
-dhat-heap = []    # if you are doing heap profiling
-dhat-ad-hoc = []  # if you are doing ad hoc profiling

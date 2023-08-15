@@ -19,11 +19,11 @@ pub enum Material {
 
 impl Material {
     pub fn is_solid(&self) -> bool {
-        (self.clone() as u8 & SOLID) != 0
+        (*self as u8 & SOLID) != 0
     }
 
     pub fn is_opaque(&self) -> bool {
-        (self.clone() as u8 & OPAQUE) != 0
+        (*self as u8 & OPAQUE) != 0
     }
 
     pub fn color(&self) -> [f32; 3] {

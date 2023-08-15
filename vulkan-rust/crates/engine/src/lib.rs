@@ -224,7 +224,7 @@ impl Engine {
                         cam.cam.position.z as i32 / CHUNK_SIZE as i32,
                     );
 
-                    let render_dist = 3;
+                    let render_dist = 1;
                     let mut ids = vec![];
                     for z in -render_dist..=render_dist {
                         for y in -render_dist..=render_dist {
