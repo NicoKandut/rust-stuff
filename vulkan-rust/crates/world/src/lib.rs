@@ -1,23 +1,36 @@
 #![feature(test)]
+#![feature(generic_const_exprs)]
 
 extern crate nalgebra_glm as glm;
 extern crate test;
 
 pub mod chunk_generator;
+pub mod chunk_id;
 pub mod chunk_manager;
 pub mod mesh_generator;
+pub mod mesh_manager;
 pub mod terrain_noise;
+pub mod world_parameters;
+pub mod world_position;
 
 use std::collections::BTreeSet;
 
 use chunk_generator::ChunkGenerator;
-use chunk_manager::{ChunkId, ChunkManager};
+use chunk_id::ChunkId;
+use chunk_manager::ChunkManager;
 use gamedata::material::Material;
+use graphics::AABB;
+use mesh_manager::MeshManager;
 use octree::{L6Node, LeafAccess};
+use world_position::WorldPosition;
 
 pub const CHUNK_SIZE: usize = L6Node::<Material>::SIZE;
 pub const CHUNK_SIZE_SQUARED: usize = CHUNK_SIZE * CHUNK_SIZE;
 pub const CHUNK_SIZE_CUBED: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
+
+pub const CHUNK_SIZE_I: i32 = CHUNK_SIZE as i32;
+pub const CHUNK_SIZE_SQUARED_I: i32 = CHUNK_SIZE_SQUARED as i32;
+pub const CHUNK_SIZE_CUBED_I: i32 = CHUNK_SIZE_CUBED as i32;
 
 pub const CHUNK_SIZE_SAFE: usize = CHUNK_SIZE + 2;
 pub const CHUNK_SIZE_SAFE_SQUARED: usize = CHUNK_SIZE_SAFE * CHUNK_SIZE_SAFE;
@@ -25,30 +38,60 @@ pub const CHUNK_SIZE_SAFE_CUBED: usize = CHUNK_SIZE_SAFE * CHUNK_SIZE_SAFE * CHU
 
 pub type ChunkDataCube = [[[Material; CHUNK_SIZE]; CHUNK_SIZE]; CHUNK_SIZE];
 
+impl From<&ChunkId> for AABB {
+    fn from(id: &ChunkId) -> Self {
+        let min = glm::vec3(
+            (id.x * CHUNK_SIZE as i32) as f32,
+            (id.y * CHUNK_SIZE as i32) as f32,
+            (id.z * CHUNK_SIZE as i32) as f32,
+        );
+        let max = glm::vec3(
+            min.x + CHUNK_SIZE as f32,
+            min.y + CHUNK_SIZE as f32,
+            min.z + CHUNK_SIZE as f32,
+        );
+
+        AABB::new(min, max)
+    }
+}
+
+impl From<&ChunkId> for WorldPosition {
+    fn from(id: &ChunkId) -> Self {
+        Self::new(
+            id.x * CHUNK_SIZE as i32,
+            id.y * CHUNK_SIZE as i32,
+            id.z * CHUNK_SIZE as i32,
+        )
+    }
+}
+
 pub struct World {
     pub generator: ChunkGenerator,
-    pub manager: ChunkManager,
+    pub chunk_manager: ChunkManager,
+    pub mesh_manager: MeshManager,
 }
 
 impl World {
     pub fn new() -> Self {
         Self {
             generator: ChunkGenerator::new(),
-            manager: ChunkManager::new(),
+            chunk_manager: ChunkManager::new(),
+            mesh_manager: MeshManager::new(),
         }
     }
 
     pub fn ids(&self) -> &BTreeSet<ChunkId> {
-        self.manager.ids()
+        self.chunk_manager.ids()
     }
 
     pub fn get_chunks(&self) -> Vec<(&ChunkId, &Box<ChunkData>)> {
-        self.manager.get_all()
+        self.chunk_manager.get_all()
     }
 
     pub fn load(&mut self, id: &ChunkId) {
         let data = self.generator.generate(id);
-        self.manager.insert_data(id, data);
+        let compact = self.generator.compress(&data.0);
+        self.chunk_manager.insert_data(id, compact);
     }
 
     pub fn intersects_point(&self, p: [f32; 3]) -> bool {
@@ -64,7 +107,7 @@ impl World {
             (p[2] as i32 % CHUNK_SIZE as i32) as usize,
         ];
 
-        if let Some(chunk) = self.manager.get_data(&id) {
+        if let Some(chunk) = self.chunk_manager.get_data(&id) {
             if let Some(material) = chunk.get(
                 position_in_chunk[0],
                 position_in_chunk[1],

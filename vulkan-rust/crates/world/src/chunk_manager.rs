@@ -1,100 +1,10 @@
-use graphics::{Mesh, AABB};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    ops::{Add, AddAssign},
-};
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{ChunkData, CHUNK_SIZE};
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ChunkId {
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-}
-
-impl ChunkId {
-    pub fn dist2(lhs: &ChunkId, rhs: &ChunkId) -> i32 {
-        let diff = [lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z];
-
-        diff[0].pow(2) + diff[1].pow(2) + diff[2].pow(2)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct WorldPosition {
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-}
-
-impl WorldPosition {
-    pub fn new(x: i32, y: i32, z: i32) -> Self {
-        Self { x, y, z }
-    }
-}
-
-impl Add<i32> for WorldPosition {
-    type Output = Self;
-
-    fn add(self, rhs: i32) -> Self::Output {
-        Self::new(self.x + rhs, self.y + rhs, self.z + rhs)
-    }
-}
-
-impl Add<Self> for WorldPosition {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Self::new(self.x + rhs.x, self.y + rhs.y, self.z + rhs.z)
-    }
-}
-
-impl AddAssign<i32> for WorldPosition {
-    fn add_assign(&mut self, rhs: i32) {
-        self.x += rhs;
-        self.y += rhs;
-        self.z += rhs;
-    }
-}
-
-impl ChunkId {
-    pub fn new(x: i32, y: i32, z: i32) -> Self {
-        Self { x, y, z }
-    }
-}
-
-impl From<&ChunkId> for AABB {
-    fn from(id: &ChunkId) -> Self {
-        let min = glm::vec3(
-            (id.x * CHUNK_SIZE as i32) as f32,
-            (id.y * CHUNK_SIZE as i32) as f32,
-            (id.z * CHUNK_SIZE as i32) as f32,
-        );
-        let max = glm::vec3(
-            min.x + CHUNK_SIZE as f32,
-            min.y + CHUNK_SIZE as f32,
-            min.z + CHUNK_SIZE as f32,
-        );
-
-        AABB::new(min, max)
-    }
-}
-
-impl From<ChunkId> for WorldPosition {
-    fn from(id: ChunkId) -> Self {
-        Self::new(
-            id.x * CHUNK_SIZE as i32,
-            id.y * CHUNK_SIZE as i32,
-            id.z * CHUNK_SIZE as i32,
-        )
-    }
-}
+use crate::{chunk_id::ChunkId, ChunkData};
 
 pub struct ChunkManager {
     pub ids: BTreeSet<ChunkId>,
     pub chunks: BTreeMap<ChunkId, Box<ChunkData>>,
-    pub meshes: BTreeMap<ChunkId, Box<Mesh>>,
 }
 
 impl ChunkManager {
@@ -102,7 +12,6 @@ impl ChunkManager {
         Self {
             ids: BTreeSet::new(),
             chunks: BTreeMap::new(),
-            meshes: BTreeMap::new(),
         }
     }
 
@@ -114,20 +23,9 @@ impl ChunkManager {
         self.chunks.insert(id.clone(), Box::new(data));
     }
 
-    pub fn insert_mesh(&mut self, id: &ChunkId, mesh: Mesh) {
-        self.meshes.insert(id.clone(), Box::new(mesh));
-    }
-
     pub fn get_data(&self, id: &ChunkId) -> Option<&ChunkData> {
         match self.chunks.get(id) {
             Some(chunk_box) => Some(chunk_box),
-            None => None,
-        }
-    }
-
-    pub fn get_mesh(&self, id: &ChunkId) -> Option<&Mesh> {
-        match self.meshes.get(id) {
-            Some(mesh) => Some(mesh),
             None => None,
         }
     }

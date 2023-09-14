@@ -1,4 +1,4 @@
-use crate::node::{self, Node};
+use crate::node::Node;
 
 #[derive(Default, Debug)]
 pub struct NodeManager {
@@ -6,25 +6,35 @@ pub struct NodeManager {
 }
 
 #[derive(Debug)]
-struct NodeRc {
+pub struct NodeRc {
     node: Node,
     use_count: usize,
 }
 
-pub struct NodeId(usize);
+impl NodeRc {
+    pub fn new(node: Node) -> Self {
+        Self { node, use_count: 1 }
+    }
+
+    pub fn inc_use(&mut self) {
+        self.use_count += 1;
+    }
+
+    pub fn dec_use(&mut self) {
+        self.use_count -= 1;
+    }
+}
 
 impl NodeManager {
-    pub fn new() -> Self {
-        Self {
-            nodes: Vec::default(),
-        }
+    pub fn nodes(&self) -> &Vec<NodeRc> {
+        &self.nodes
     }
 
     pub fn index_of(&self, node: &Node) -> Option<usize> {
         let mut index = 0;
 
-        for current_node in &self.nodes {
-            if *node == current_node.node {
+        for current_node_rc in &self.nodes {
+            if *node == current_node_rc.node {
                 return Some(index);
             }
 
@@ -35,14 +45,15 @@ impl NodeManager {
     }
 
     /**
-     * Adds a node to the node manager. Returns true if the node was added and false if it was already present.
+     * Adds a node to the node manager.
+     * Returns the node id
      */
     pub fn add(&mut self, node: Node) -> usize {
         if let Some(index) = self.index_of(&node) {
-            self.nodes[index].use_count += 1;
+            self.nodes[index].inc_use();
             index
         } else {
-            self.nodes.push(NodeRc { node, use_count: 1 });
+            self.nodes.push(NodeRc::new(node));
             self.nodes.len() - 1
         }
     }
@@ -52,7 +63,7 @@ impl NodeManager {
      */
     pub fn remove(&mut self, node: &Node) -> bool {
         if let Some(index) = self.index_of(&node) {
-            self.nodes[index].use_count -= 1;
+            self.nodes[index].dec_use();
             true
         } else {
             false
@@ -71,7 +82,7 @@ impl NodeManager {
     }
 
     /**
-     * Sets the child of a node
+     * Sets the child of a node. Use exiting if possible, otherwise clone.
      */
     pub fn set_child_of(&mut self, parent_id: &usize, child_index: &usize, child_id: &usize) {
         if let Some(node_rc) = self.nodes.get_mut(*parent_id) {
@@ -86,7 +97,7 @@ impl NodeManager {
                 self.add(node);
             }
         } else {
-            panic!("Attempted to set child of non-existent parent");
+            panic!("Attempted to set child of non-existent parent: {parent_id}");
         }
     }
 }
@@ -95,10 +106,13 @@ impl NodeManager {
 mod tests {
     use std::mem::size_of;
 
-    use rand::{rngs::ThreadRng, Rng, RngCore};
+    use rand::Rng;
     use test::Bencher;
 
     use crate::{node::Node, NodeManager};
+
+    const CHUNK_SIZE: usize = 64;
+    const CHUNK_SIZE_CUBED: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
 
     #[test]
     fn add_same_node() {
@@ -124,27 +138,23 @@ mod tests {
 
     #[bench]
     fn add_chunk_uniform(b: &mut Bencher) {
-        let mut manager = NodeManager::new();
+        let mut manager = NodeManager::default();
 
         b.iter(|| {
-            test::black_box(for z in 0..32 {
-                for y in 0..32 {
-                    for x in 0..32 {
-                        manager.add(Node::new([0, 0, 0, 0, 0, 0, 0, 0]));
-                    }
-                }
+            test::black_box(for _ in 0..CHUNK_SIZE_CUBED {
+                manager.add(Node::new([0, 0, 0, 0, 0, 0, 0, 0]));
             });
         });
     }
 
     #[bench]
     fn add_chunk_checkered(b: &mut Bencher) {
-        let mut manager = NodeManager::new();
+        let mut manager = NodeManager::default();
 
         b.iter(|| {
-            test::black_box(for z in 0..32 {
-                for y in 0..32 {
-                    for x in 0..32 {
+            test::black_box(for z in 0..CHUNK_SIZE {
+                for y in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
                         manager.add(Node::new([
                             (z + y + x) % 2,
                             (z + y + x + 1) % 2,
@@ -163,7 +173,7 @@ mod tests {
 
     #[bench]
     fn add_chunk_pseudo_random(b: &mut Bencher) {
-        let mut manager = NodeManager::new();
+        let mut manager = NodeManager::default();
 
         b.iter(|| {
             test::black_box(for z in 0..32 {
@@ -190,12 +200,12 @@ mod tests {
         let chunk_size = 64;
         let materials = 3;
 
-        let mut manager = NodeManager::new();
+        let mut manager = NodeManager::default();
         let mut random = rand::thread_rng();
 
-        for z in 0..(chunk_size / 2) {
-            for y in 0..(chunk_size / 2) {
-                for x in 0..(chunk_size / 2) {
+        for _z in 0..(chunk_size / 2) {
+            for _y in 0..(chunk_size / 2) {
+                for _x in 0..(chunk_size / 2) {
                     manager.add(Node::new([
                         random.gen_range(0..materials),
                         random.gen_range(0..materials),

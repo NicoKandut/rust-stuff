@@ -14,9 +14,9 @@ impl Position {
 
     pub fn rounded_to(&self, size: isize) -> Self {
         Self::new(
-            self.x / size * size,
-            self.y / size * size,
-            self.z / size * size,
+            (self.x as f32 / size as f32).floor() as isize * size,
+            (self.y as f32 / size as f32).floor() as isize * size,
+            (self.z as f32 / size as f32).floor() as isize * size,
         )
     }
 
@@ -64,6 +64,30 @@ mod tests {
         assert_eq!(
             Position::new(64, 64, 64).rounded_to(CHUNK_SIZE),
             Position::new(64, 64, 64)
+        );
+        assert_eq!(
+            Position::new(0, 0, -1).rounded_to(CHUNK_SIZE),
+            Position::new(0, 0, -64)
+        );
+        assert_eq!(
+            Position::new(0, -1, 0).rounded_to(CHUNK_SIZE),
+            Position::new(0, -64, 0)
+        );
+        assert_eq!(
+            Position::new(-1, 0, 0).rounded_to(CHUNK_SIZE),
+            Position::new(-64, 0, 0)
+        );
+        assert_eq!(
+            Position::new(0, 0, -64).rounded_to(CHUNK_SIZE),
+            Position::new(0, 0, -64)
+        );
+        assert_eq!(
+            Position::new(0, -64, 0).rounded_to(CHUNK_SIZE),
+            Position::new(0, -64, 0)
+        );
+        assert_eq!(
+            Position::new(-64, 0, 0).rounded_to(CHUNK_SIZE),
+            Position::new(-64, 0, 0)
         );
     }
 }

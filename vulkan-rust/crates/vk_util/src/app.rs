@@ -28,10 +28,7 @@ use vulkanalia::{
     window as vk_window,
 };
 use winit::window::Window;
-use world::{
-    chunk_manager::{ChunkId, WorldPosition},
-    World,
-};
+use world::{chunk_id::ChunkId, world_position::WorldPosition, World};
 
 #[derive(Clone, Debug)]
 pub struct App {
@@ -220,8 +217,8 @@ impl App {
         let frustum = Frustum::from_mat4(&(proj * view));
 
         let secondary_command_buffers = world
-            .manager
-            .meshes
+            .mesh_manager
+            .get_all()
             .iter()
             .filter_map(|(id, mesh)| {
                 if frustum.intersects_aabb(&id.into()) {
@@ -238,8 +235,10 @@ impl App {
         //     secondary_command_buffers.len()
         // );
 
-        self.device
-            .cmd_execute_commands(command_buffer, &secondary_command_buffers[..]);
+        if secondary_command_buffers.len() > 0 {
+            self.device
+                .cmd_execute_commands(command_buffer, &secondary_command_buffers[..]);
+        }
 
         self.device.cmd_end_render_pass(command_buffer);
 
@@ -273,7 +272,7 @@ impl App {
         let command_buffer = command_buffers[id];
         let vertex_buffer = self.data.chunk_vertex_buffers[id];
 
-        let start = WorldPosition::from(id.clone());
+        let start = WorldPosition::from(id);
         let x = start.x as f32;
         let y = start.y as f32;
         let z = start.z as f32;

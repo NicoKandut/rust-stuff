@@ -1,6 +1,6 @@
 use crate::Vertex;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Mesh {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,

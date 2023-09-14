@@ -1,0 +1,1 @@
+pub const SEA_LEVEL: i32 = 0;

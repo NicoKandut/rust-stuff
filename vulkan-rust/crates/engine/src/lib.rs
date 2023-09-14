@@ -8,7 +8,7 @@ use anyhow::{anyhow, Result};
 use gamedata::material::Material;
 use gamestate::GameState;
 use graphics::{
-    camera::{self, FlyingCamera},
+    camera::{self, Camera, FlyingCamera},
     Mesh, Vertex,
 };
 use log::*;
@@ -48,10 +48,8 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 use world::{
-    chunk_generator::ChunkGenerator,
-    chunk_manager::{ChunkId, WorldPosition},
-    mesh_generator::generate_greedy_mesh,
-    ChunkData, World, CHUNK_SIZE,
+    chunk_generator::ChunkGenerator, chunk_id::ChunkId, mesh_generator::generate_greedy_mesh,
+    ChunkData, World, CHUNK_SIZE, CHUNK_SIZE_SAFE_CUBED,
 };
 
 mod gamestate;
@@ -65,16 +63,22 @@ struct GeneratedChunk(ChunkId, ChunkData, Option<Mesh>);
 
 fn generate_chunk(id: &ChunkId) -> GeneratedChunk {
     let generator = ChunkGenerator::new();
-    let data = generator.generate(&id);
-    let mesh = if data.needs_mesh() {
-        Some(generate_greedy_mesh(&id, &data))
+    let (data, block_count) = generator.generate(&id);
+    let compact_data = generator.compress(&data);
+    let mesh = if block_count > 0 && block_count < CHUNK_SIZE_SAFE_CUBED {
+        let maybe_mesh = generate_greedy_mesh(&id, &data);
+        if maybe_mesh.vertices.len() == 0 {
+            None
+        } else {
+            Some(maybe_mesh)
+        }
     } else {
         None
     };
 
-    println!("{LOG_WORLD} Generating chunk");
+    // println!("{LOG_WORLD} Generating chunk");
 
-    GeneratedChunk(id.clone(), data, mesh)
+    GeneratedChunk(id.clone(), compact_data, mesh)
 }
 
 pub struct WorkingQueue<I, O>
@@ -82,6 +86,7 @@ where
     I: 'static + Clone + Send,
     O: 'static + Clone + Send,
 {
+    name: String,
     _threads: Vec<JoinHandle<()>>,
     sender: Arc<(Mutex<VecDeque<I>>, Condvar)>,
     receiver: Receiver<O>,
@@ -92,45 +97,50 @@ where
     I: 'static + Clone + Send,
     O: 'static + Clone + Send,
 {
-    pub fn new(work_function: fn(&I) -> O) -> Self {
+    pub fn new(name: String, work_function: fn(&I) -> O) -> Self {
         let work_queue = Arc::new((Mutex::new(VecDeque::<I>::new()), Condvar::new()));
         let (result_sender, result_receiver) = channel::<O>();
 
         let mut threads = Vec::new();
-        for _ in 0..8 {
+        for thread_id in 0..8 {
             let receiver = work_queue.clone();
             let sender = result_sender.clone();
 
-            let thread = thread::spawn(move || loop {
-                // get task
-                let task = {
-                    let (lock, condition) = &*receiver;
-                    let mut queue = lock.lock().unwrap();
+            let thread = thread::Builder::new()
+                .name(format!("{name}_{thread_id}"))
+                .stack_size(8 * 1024 * 1024)
+                .spawn(move || loop {
+                    // get task
+                    let task = {
+                        let (lock, condition) = &*receiver;
+                        let mut queue = lock.lock().unwrap();
 
-                    while queue.is_empty() {
-                        queue = condition.wait(queue).unwrap()
+                        while queue.is_empty() {
+                            queue = condition.wait(queue).unwrap()
+                        }
+
+                        queue.pop_front().unwrap()
+                    };
+
+                    // do work
+                    let result = work_function(&task);
+
+                    // submit result
+                    match sender.send(result) {
+                        Ok(_) => (),
+                        Err(_) => {
+                            break;
+                        }
                     }
 
-                    queue.pop_front().unwrap()
-                };
-
-                // do work
-                let result = work_function(&task);
-
-                // submit result
-                match sender.send(result) {
-                    Ok(_) => (),
-                    Err(_) => {
-                        break;
-                    }
-                }
-
-                thread::yield_now();
-            });
+                    thread::yield_now();
+                })
+                .expect("Failed to spawn thread");
             threads.push(thread)
         }
 
         Self {
+            name,
             _threads: threads,
             sender: work_queue,
             receiver: result_receiver,
@@ -138,19 +148,64 @@ where
     }
 }
 
-pub struct Engine {}
+pub struct Engine {
+    camera: FlyingCamera,
+    world: World,
+}
 
 impl Engine {
     pub fn create() -> Self {
-        Self {}
+        Self {
+            camera: FlyingCamera::new(glm::vec3(0., 0., 64.)),
+            world: World::new(),
+        }
     }
 
-    pub fn run(&mut self) -> Result<()> {
+    pub fn update_camera(&mut self, delta_time: &f32) {
+        // read camera
+        let direction = self.camera.movement.velocity.normalize();
+
+        // modify camera
+        self.camera.cam.position += self.camera.movement.velocity * *delta_time;
+        if (self.camera.input.is_pressed()) {
+            let acceleration = self.camera.cam.get_base_change_mat()
+                * self.camera.input.get_as_vec()
+                * self.camera.movement.acceleration_factor
+                * 0.3;
+
+            self.camera.movement.velocity += acceleration;
+
+            if self.camera.movement.velocity.magnitude() > 20. {
+                self.camera.movement.velocity.set_magnitude(20.)
+            }
+        } else {
+            self.camera.movement.velocity = self
+                .camera
+                .movement
+                .velocity
+                .lerp(&glm::Vec3::default(), 0.2);
+        }
+
+        self.camera.cam.position += self.camera.movement.velocity * *delta_time;
+
+        // check intersection
+
+        if self
+            .world
+            .intersects_point((self.camera.cam.position + direction * 1.).into())
+            || self
+                .world
+                .intersects_point((self.camera.cam.position + direction * 0.5).into())
+        {
+            // move back
+            self.camera.cam.position -= self.camera.movement.velocity * *delta_time;
+        }
+    }
+
+    pub fn run(mut self) -> Result<()> {
         pretty_env_logger::init();
 
-        let mut world = World::new();
-
-        let generation_queue = WorkingQueue::new(generate_chunk);
+        let generation_queue = WorkingQueue::new("chunk_generation".to_string(), generate_chunk);
 
         // main loop
         let event_loop = EventLoop::new();
@@ -160,7 +215,6 @@ impl Engine {
             .build(&event_loop)?;
 
         let mut app = unsafe { App::create(&window)? };
-        let mut cam = FlyingCamera::new(glm::vec3(0., 0., 64.));
 
         let mut destroying = false;
         let mut minimized = false;
@@ -175,98 +229,41 @@ impl Engine {
 
         let mut previous_frame_start = Instant::now();
 
+        let mut frame_counter = 0;
+        let start = Instant::now();
+        let mut seconds_since_start: u64 = 0;
+
         event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Poll;
             match event {
                 Event::MainEventsCleared if !destroying && !minimized => {
                     let current_frame_start = Instant::now();
+                    frame_counter += 1;
 
                     let delta_time = &current_frame_start
                         .duration_since(previous_frame_start)
                         .as_secs_f32();
 
-                    // read camera
-                    let direction = cam.movement.velocity.normalize();
+                    self.update_camera(delta_time);
+                    self.load_chunks(&generation_queue);
 
-                    // modify camera
-                    cam.cam.position += cam.movement.velocity * *delta_time;
-                    if (cam.input.is_pressed()) {
-                        let acceleration = cam.cam.get_base_change_mat()
-                            * cam.input.get_as_vec()
-                            * cam.movement.acceleration_factor
-                            * 0.3;
-
-                        cam.movement.velocity += acceleration;
-
-                        if cam.movement.velocity.magnitude() > 20. {
-                            cam.movement.velocity.set_magnitude(20.)
-                        }
-                    } else {
-                        cam.movement.velocity =
-                            cam.movement.velocity.lerp(&glm::Vec3::default(), 0.2);
-                    }
-
-                    cam.cam.position += cam.movement.velocity * *delta_time;
-
-                    // check intersection
-
-                    if world.intersects_point((cam.cam.position + direction * 1.).into())
-                        || world.intersects_point((cam.cam.position + direction * 0.5).into())
-                    {
-                        // move back
-                        cam.cam.position -= cam.movement.velocity * *delta_time;
-                    }
-
-                    // load chunks
-                    let player_chunk = ChunkId::new(
-                        cam.cam.position.x as i32 / CHUNK_SIZE as i32,
-                        cam.cam.position.y as i32 / CHUNK_SIZE as i32,
-                        cam.cam.position.z as i32 / CHUNK_SIZE as i32,
-                    );
-
-                    let render_dist = 1;
-                    let mut ids = vec![];
-                    for z in -render_dist..=render_dist {
-                        for y in -render_dist..=render_dist {
-                            for x in -render_dist..=render_dist {
-                                let chunk_id = ChunkId::new(
-                                    player_chunk.x + x,
-                                    player_chunk.y + y,
-                                    player_chunk.z + z,
-                                );
-
-                                if !world.manager.ids.contains(&chunk_id) {
-                                    ids.push(chunk_id);
-                                }
-                            }
-                        }
-                    }
-
-                    ids.sort_by(|a, b| {
-                        ChunkId::dist2(a, &player_chunk).cmp(&ChunkId::dist2(b, &player_chunk))
-                    });
-
-                    {
-                        let (lock, condition) = &*generation_queue.sender;
-                        if let Ok(ref mut mutex) = lock.try_lock() {
-                            world.manager.ids.extend(ids.clone());
-                            mutex.extend(ids);
-                            condition.notify_all();
-                        }
-                    }
-
-                    while let Ok(generated_chunk) = generation_queue.receiver.try_recv() {
+                    if let Ok(generated_chunk) = generation_queue.receiver.try_recv() {
                         let GeneratedChunk(id, chunk_data, chunk_mesh) = generated_chunk;
-                        add_chunk(&id, chunk_data, chunk_mesh, &mut world, &mut app);
-
-                        if (current_frame_start.elapsed() > Duration::from_millis(4)) {
-                            break;
-                        }
+                        add_chunk(&id, chunk_data, chunk_mesh, &mut self.world, &mut app);
                     }
 
                     previous_frame_start = current_frame_start;
 
-                    unsafe { app.render(&window, &world, &cam) }.unwrap()
+                    let new_seconds_since_start =
+                        &current_frame_start.duration_since(start).as_secs();
+
+                    if *new_seconds_since_start > seconds_since_start {
+                        println!("FPS: {frame_counter}");
+                        frame_counter = 0;
+                        seconds_since_start = *new_seconds_since_start;
+                    }
+
+                    unsafe { app.render(&window, &self.world, &self.camera) }.unwrap()
                 }
                 Event::WindowEvent {
                     event: WindowEvent::Resized(size),
@@ -335,7 +332,7 @@ impl Engine {
                     }
 
                     if let Some(key) = virtual_keycode {
-                        cam.input.set_key(key, pressed);
+                        self.camera.input.set_key(key, pressed);
                     }
                 }
                 Event::WindowEvent {
@@ -362,13 +359,50 @@ impl Engine {
                         window
                             .set_cursor_position(center)
                             .expect("Cursor position setting failed");
-                        cam.cam.add_pitch((y * 0.1) as f32);
-                        cam.cam.add_yaw((x * 0.1) as f32);
+                        self.camera.cam.add_pitch((y * 0.1) as f32);
+                        self.camera.cam.add_yaw((x * 0.1) as f32);
                     }
                 }
                 _ => {}
             }
         });
+    }
+
+    fn load_chunks(&mut self, generators: &WorkingQueue<ChunkId, GeneratedChunk>) {
+        // load chunks
+        let player_chunk = ChunkId::new(
+            self.camera.cam.position.x as i32 / CHUNK_SIZE as i32,
+            self.camera.cam.position.y as i32 / CHUNK_SIZE as i32,
+            self.camera.cam.position.z as i32 / CHUNK_SIZE as i32,
+        );
+
+        let render_dist = 2;
+        let mut ids = vec![];
+        for z in -render_dist..=render_dist {
+            for y in -render_dist..=render_dist {
+                for x in -render_dist..=render_dist {
+                    let chunk_id =
+                        ChunkId::new(player_chunk.x + x, player_chunk.y + y, player_chunk.z + z);
+
+                    if !self.world.chunk_manager.ids.contains(&chunk_id)
+                    // && chunk_id == ChunkId::new(0, 0, 0)
+                    {
+                        ids.push(chunk_id);
+                    }
+                }
+            }
+        }
+
+        ids.sort_by(|a, b| ChunkId::dist2(a, &player_chunk).cmp(&ChunkId::dist2(b, &player_chunk)));
+
+        {
+            let (lock, condition) = &*generators.sender;
+            if let Ok(ref mut mutex) = lock.try_lock() {
+                self.world.chunk_manager.ids.extend(ids.clone());
+                mutex.extend(ids);
+                condition.notify_all();
+            }
+        }
     }
 }
 
@@ -379,12 +413,12 @@ fn add_chunk(
     world: &mut World,
     app: &mut App,
 ) {
-    world.manager.insert_data(&id, chunk_data);
+    world.chunk_manager.insert_data(&id, chunk_data);
     if let Some(mesh) = chunk_mesh {
         unsafe {
             create_chunk_buffers(&app.instance, &app.device, &id, &mesh, &mut app.data);
         };
 
-        world.manager.insert_mesh(&id, mesh);
+        world.mesh_manager.insert(&id, mesh);
     }
 }

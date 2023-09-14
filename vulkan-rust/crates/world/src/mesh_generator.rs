@@ -8,13 +8,11 @@ use gamedata::material::Material;
 use graphics::{Mesh, Vertex};
 
 use crate::{
-    chunk_manager::{ChunkId, WorldPosition},
-    ChunkData, CHUNK_SIZE,
+    chunk_generator::Slice3, chunk_id::ChunkId, ChunkData, CHUNK_SIZE, CHUNK_SIZE_SAFE,
+    CHUNK_SIZE_SQUARED,
 };
 
-const CS: usize = CHUNK_SIZE;
-
-pub fn generate_greedy_mesh(id: &ChunkId, data: &ChunkData) -> Mesh {
+pub fn generate_greedy_mesh(id: &ChunkId, data: &Slice3<Material, CHUNK_SIZE_SAFE>) -> Mesh {
     let mut mesh = Mesh::default();
     let mut vertex_count = 0;
 
@@ -27,37 +25,27 @@ pub fn generate_greedy_mesh(id: &ChunkId, data: &ChunkData) -> Mesh {
 
         let mut x = [0; 3];
         let mut x2 = [0; 3];
-        x[d] = 0;
+        x[d] = 1;
 
         // look at all layers
-        while x[d] < (CS + 1) {
-            x[u] = 0;
-            x[v] = 0;
+        while x[d] < CHUNK_SIZE_SAFE {
+            x[u] = 1;
+            x[v] = 1;
             // build the mask
-            let mut mask = [None; CS * CS];
+            let mut mask = [None; CHUNK_SIZE_SQUARED];
             let mut n = 0;
-            while x[v] < CS {
-                x[u] = 0;
-                while x[u] < CS {
-                    let cur_mat = data.get(x[0], x[1], x[2]);
-                    let next_mat = if x[d] == 0 {
-                        None // outside of chunk
-                    } else {
-                        x2 = x;
-                        x2[d] -= 1;
-                        data.get(x2[0], x2[1], x2[2])
-                    };
-
-                    let face_type_c = match (cur_mat, next_mat) {
-                        (None, None) => None,
-                        (Some(m), None) => Some((m, true)),
-                        (None, Some(m)) => Some((m, false)),
-                        (Some(m1), Some(m2)) => match (m1.is_opaque(), m2.is_opaque()) {
-                            (true, true) => None,
-                            (true, false) => Some((m1, true)),
-                            (false, true) => Some((m2, false)),
-                            (false, false) => None,
-                        },
+            while x[v] < (CHUNK_SIZE_SAFE - 1) {
+                x[u] = 1;
+                while x[u] < (CHUNK_SIZE_SAFE - 1) {
+                    x2 = x;
+                    x2[d] -= 1;
+                    let cur_mat = data[x[0]][x[1]][x[2]];
+                    let prev_mat = data[x2[0]][x2[1]][x2[2]];
+                    let face_type_c = match (cur_mat.is_opaque(), prev_mat.is_opaque()) {
+                        (true, true) => None,
+                        (true, false) => Some((cur_mat, true)),
+                        (false, true) => Some((prev_mat, false)),
+                        (false, false) => None,
                     };
 
                     mask[n] = face_type_c;
@@ -68,13 +56,13 @@ pub fn generate_greedy_mesh(id: &ChunkId, data: &ChunkData) -> Mesh {
             }
 
             let mut start = [0_usize; 3];
-            start[d] = x[d] as usize;
+            start[d] = x[d] - 1 as usize;
             let mut n = 0;
 
-            for mask_v in 0..CS {
+            for mask_v in 0..CHUNK_SIZE {
                 start[v] = mask_v;
                 start[u] = 0;
-                for mask_u in 0..CS {
+                for mask_u in 0..CHUNK_SIZE {
                     if mask[n] == None {
                         n += 1;
                         continue;
@@ -84,8 +72,9 @@ pub fn generate_greedy_mesh(id: &ChunkId, data: &ChunkData) -> Mesh {
                     let mut end = start;
 
                     // find length in dim1
-                    while end[u] < CS
-                        && mask[end[v] * CS + end[u]] == mask[start[v] * CS + start[u]]
+                    while end[u] < CHUNK_SIZE
+                        && mask[end[v] * CHUNK_SIZE + end[u]]
+                            == mask[start[v] * CHUNK_SIZE + start[u]]
                     {
                         end[u] += 1;
                     }
@@ -95,9 +84,12 @@ pub fn generate_greedy_mesh(id: &ChunkId, data: &ChunkData) -> Mesh {
                     end[v] += 1;
 
                     // find length in dim2
-                    while end[v] < CS && mask[end[v] * CS + end[u]] == mask[start[v] + start[u]] {
+                    while end[v] < CHUNK_SIZE
+                        && mask[end[v] * CHUNK_SIZE + end[u]] == mask[start[v] + start[u]]
+                    {
                         while end[u] < u_end
-                            && mask[end[v] * CS + end[u]] == mask[start[v] * CS + start[u]]
+                            && mask[end[v] * CHUNK_SIZE + end[u]]
+                                == mask[start[v] * CHUNK_SIZE + start[u]]
                         {
                             end[u] += 1;
                         }
@@ -111,7 +103,7 @@ pub fn generate_greedy_mesh(id: &ChunkId, data: &ChunkData) -> Mesh {
                     }
                     end[u] = u_end;
 
-                    let (m, orientation) = mask[start[v] * CS + start[u]].unwrap();
+                    let (m, orientation) = mask[start[v] * CHUNK_SIZE + start[u]].unwrap();
                     let mut normal = [0, 0, 0];
                     normal[d] = 1 - 2 * (orientation as i32);
                     let normal = glm::vec3(normal[0] as f32, normal[1] as f32, normal[2] as f32);
@@ -147,7 +139,7 @@ pub fn generate_greedy_mesh(id: &ChunkId, data: &ChunkData) -> Mesh {
 
                     for vm in start[v]..end[v] {
                         for um in start[u]..end[u] {
-                            mask[vm * CS + um] = None;
+                            mask[vm * CHUNK_SIZE + um] = None;
                         }
                     }
                     n += 1;
@@ -166,14 +158,45 @@ mod test {
 
     use gamedata::material::Material;
 
-    use crate::{chunk_generator::ChunkGenerator, chunk_manager::ChunkId, ChunkData};
+    use crate::{chunk_generator::ChunkGenerator, chunk_id::ChunkId, CHUNK_SIZE_SAFE};
 
     use super::generate_greedy_mesh;
 
     #[test]
     fn empty() {
         let id = ChunkId::new(17, 17, 17);
-        let mut data = ChunkData::default();
+        let mut data = [[[Material::Air; CHUNK_SIZE_SAFE]; CHUNK_SIZE_SAFE]; CHUNK_SIZE_SAFE];
+        let mesh = generate_greedy_mesh(&id, &data);
+        assert_eq!(mesh.vertices.len(), 0);
+        assert_eq!(mesh.indices.len(), 0);
+    }
+
+    #[test]
+    fn borders_mesh_to_empty() {
+        let id = ChunkId::new(17, 17, 17);
+        let mut data = [[[Material::Air; CHUNK_SIZE_SAFE]; CHUNK_SIZE_SAFE]; CHUNK_SIZE_SAFE];
+        for d in 0..3 {
+            let u = (d + 1) % 3;
+            let v = (d + 2) % 3;
+            let mut x = [0, 0, 0];
+            for i in 0..65 {
+                x[d] = i;
+
+                x[u] = 0;
+                x[v] = 0;
+                data[x[0]][x[1]][x[2]] = Material::Stone;
+                x[u] = 0;
+                x[v] = 65;
+                data[x[0]][x[1]][x[2]] = Material::Stone;
+                x[u] = 65;
+                x[v] = 0;
+                data[x[0]][x[1]][x[2]] = Material::Stone;
+                x[u] = 65;
+                x[v] = 65;
+                data[x[0]][x[1]][x[2]] = Material::Stone;
+            }
+        }
+
         let mesh = generate_greedy_mesh(&id, &data);
         assert_eq!(mesh.vertices.len(), 0);
         assert_eq!(mesh.indices.len(), 0);
@@ -182,11 +205,16 @@ mod test {
     #[test]
     fn single_block() {
         let id = ChunkId::new(17, 17, 17);
-        let mut data = ChunkData::default();
-        data.set(0, 0, 0, Material::Stone);
+        let mut data = [[[Material::Air; CHUNK_SIZE_SAFE]; CHUNK_SIZE_SAFE]; CHUNK_SIZE_SAFE];
+        data[1][1][1] = Material::Stone;
         let mesh = generate_greedy_mesh(&id, &data);
         assert_eq!(mesh.vertices.len(), 24);
         assert_eq!(mesh.indices.len(), 36);
+        for v in mesh.vertices {
+            assert!(v.pos.x >= 0.0 && v.pos.x <= 1.0);
+            assert!(v.pos.y >= 0.0 && v.pos.y <= 1.0);
+            assert!(v.pos.z >= 0.0 && v.pos.z <= 1.0);
+        }
     }
 
     #[bench]
@@ -195,7 +223,7 @@ mod test {
         let data = ChunkGenerator::new().generate(&id);
 
         b.iter(|| {
-            test::black_box(generate_greedy_mesh(&id, &data));
+            test::black_box(generate_greedy_mesh(&id, &data.0));
         });
     }
 
@@ -205,7 +233,7 @@ mod test {
         let data = ChunkGenerator::new().generate(&id);
 
         b.iter(|| {
-            test::black_box(generate_greedy_mesh(&id, &data));
+            test::black_box(generate_greedy_mesh(&id, &data.0));
         });
     }
 }

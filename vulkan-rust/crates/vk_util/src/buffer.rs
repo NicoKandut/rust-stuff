@@ -8,7 +8,7 @@ use anyhow::Result;
 use graphics::{Mesh, Vertex};
 use std::{mem::size_of, ptr::copy_nonoverlapping as memcpy};
 use vulkanalia::prelude::v1_0::*;
-use world::chunk_manager::ChunkId;
+use world::chunk_id::ChunkId;
 
 pub unsafe fn create_vertex_buffer(
     instance: &Instance,
@@ -58,7 +58,7 @@ pub unsafe fn create_chunk_buffers(
     mesh: &Mesh,
     data: &mut AppData,
 ) -> Result<()> {
-    println!("{LOG_VK} Creating chunk buffers");
+    // println!("{LOG_VK} Creating chunk buffers");
     create_chunk_vertex_buffer(instance, device, id, &mesh.vertices, data)?;
     create_chunk_index_buffer(instance, device, data, id, &mesh.indices)
 }
@@ -129,7 +129,7 @@ pub unsafe fn create_buffer(
     usage: vk::BufferUsageFlags,
     properties: vk::MemoryPropertyFlags,
 ) -> Result<(vk::Buffer, vk::DeviceMemory)> {
-    println!("{LOG_VK} Creating buffer");
+    // println!("{LOG_VK} Creating buffer");
     let buffer_info = vk::BufferCreateInfo::builder()
         .size(size)
         .usage(usage)
