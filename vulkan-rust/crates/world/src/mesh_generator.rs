@@ -126,7 +126,7 @@ where
                     es[v] = end[v];
                     let ee = end;
 
-                    let c: glm::Vec3 = m.color().into();
+                    let c = m.color();
 
                     let vertices = [
                         [ss[0] as f32, ss[1] as f32, ss[2] as f32],

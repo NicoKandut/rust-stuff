@@ -7,14 +7,10 @@ use anyhow::Result;
 use gamedata::material::Material;
 use graphics::{camera::FlyingCamera, Mesh, Ray};
 use render::render_distance::get_chunks_to_render;
+use threadpool::ThreadPool;
 
 use std::{
-    collections::VecDeque,
-    sync::{
-        mpsc::{channel, Receiver},
-        Arc, Condvar, Mutex,
-    },
-    thread::{self, JoinHandle},
+    sync::mpsc::{self},
     time::Instant,
 };
 use vk_util::{app::App, buffer::create_chunk_buffers};
@@ -44,6 +40,9 @@ struct GeneratedChunk(ChunkId, ChunkData, Option<Mesh>);
 
 type ChunkGenerationInput = (WorldSeed, ChunkId);
 
+const RENDER_DISTANCE: i32 = CHUNK_SIZE_I * 8;
+const PLAYER_BUILDING_REACH: f32 = 10.0;
+
 fn generate_chunk(input: &ChunkGenerationInput) -> GeneratedChunk {
     let (world_seed, chunk_id) = input;
     let chunk_seed = PositionalSeed::for_chunk(world_seed, chunk_id);
@@ -68,71 +67,6 @@ fn generate_chunk(input: &ChunkGenerationInput) -> GeneratedChunk {
     GeneratedChunk(chunk_id.clone(), compact_data, mesh)
 }
 
-pub struct WorkingQueue<I, O>
-where
-    I: 'static + Clone + Send,
-    O: 'static + Clone + Send,
-{
-    _threads: Vec<JoinHandle<()>>,
-    sender: Arc<(Mutex<VecDeque<I>>, Condvar)>,
-    receiver: Receiver<O>,
-}
-
-impl<I, O> WorkingQueue<I, O>
-where
-    I: 'static + Clone + Send,
-    O: 'static + Clone + Send,
-{
-    pub fn new(name: String, work_function: fn(&I) -> O) -> Self {
-        let work_queue = Arc::new((Mutex::new(VecDeque::<I>::new()), Condvar::new()));
-        let (result_sender, result_receiver) = channel::<O>();
-
-        let mut threads = Vec::new();
-        for thread_id in 0..8 {
-            let receiver = work_queue.clone();
-            let sender = result_sender.clone();
-
-            let thread = thread::Builder::new()
-                .name(format!("{name}_{thread_id}"))
-                .stack_size(8 * 1024 * 1024)
-                .spawn(move || loop {
-                    // get task
-                    let task = {
-                        let (lock, condition) = &*receiver;
-                        let mut queue = lock.lock().unwrap();
-
-                        while queue.is_empty() {
-                            queue = condition.wait(queue).unwrap()
-                        }
-
-                        queue.pop_front().unwrap()
-                    };
-
-                    // do work
-                    let result = work_function(&task);
-
-                    // submit result
-                    match sender.send(result) {
-                        Ok(_) => (),
-                        Err(_) => {
-                            break;
-                        }
-                    }
-
-                    thread::yield_now();
-                })
-                .expect("Failed to spawn thread");
-            threads.push(thread)
-        }
-
-        Self {
-            _threads: threads,
-            sender: work_queue,
-            receiver: result_receiver,
-        }
-    }
-}
-
 pub struct Engine {
     camera: FlyingCamera,
     world: World,
@@ -147,11 +81,6 @@ impl Engine {
     }
 
     pub fn update_camera(&mut self, delta_time: &f32) {
-        // read camera
-        let direction = self.camera.movement.velocity.normalize();
-
-        // modify camera
-        self.camera.cam.position += self.camera.movement.velocity * *delta_time;
         if self.camera.input.is_pressed() {
             let acceleration = self.camera.cam.get_base_change_mat()
                 * self.camera.input.get_as_vec()
@@ -171,26 +100,27 @@ impl Engine {
                 .lerp(&glm::Vec3::default(), 0.2);
         }
 
-        self.camera.cam.position += self.camera.movement.velocity * *delta_time;
+        // world_collision
+        if self.camera.movement.velocity.norm() >= 0.01 {
+            let desired_movement_amount = self.camera.movement.velocity.norm() * *delta_time;
+            let direction = self.camera.movement.velocity.normalize();
+            let ray = Ray::new(self.camera.cam.position, direction);
+            let movement_range = 0.0..1.0;
 
-        // check intersection
+            let allowed_movement_amount = match self.world.cast_ray(&ray, &movement_range) {
+                Some(distance) => desired_movement_amount.min(distance - 0.5),
+                None => desired_movement_amount,
+            };
 
-        if self
-            .world
-            .intersects_point((self.camera.cam.position + direction * 1.).into())
-            || self
-                .world
-                .intersects_point((self.camera.cam.position + direction * 0.5).into())
-        {
-            // move back
-            self.camera.cam.position -= self.camera.movement.velocity * *delta_time;
+            self.camera.cam.position += direction * allowed_movement_amount;
         }
     }
 
     pub fn run(mut self) -> Result<()> {
         pretty_env_logger::init();
 
-        let generation_queue = WorkingQueue::new("chunk_generation".to_string(), generate_chunk);
+        let thread_pool = ThreadPool::new("worker_thread", 7);
+        let (ready_chunks_tx, ready_chunks_rx) = mpsc::channel();
 
         // main loop
         let event_loop = EventLoop::new();
@@ -231,9 +161,9 @@ impl Engine {
                         .as_secs_f32();
 
                     self.update_camera(delta_time);
-                    self.load_chunks(&generation_queue);
+                    self.load_chunks(&thread_pool, ready_chunks_tx.clone());
 
-                    if let Ok(generated_chunk) = generation_queue.receiver.try_recv() {
+                    if let Ok(generated_chunk) = ready_chunks_rx.try_recv() {
                         let GeneratedChunk(id, chunk_data, chunk_mesh) = generated_chunk;
                         add_chunk(&id, chunk_data, chunk_mesh, &mut self.world, &mut app);
                     }
@@ -276,7 +206,7 @@ impl Engine {
                             cursor_visible = false;
                             window.set_cursor_grab(true).expect("Cursor lock failed");
                             window.set_cursor_visible(false);
-                        } else if state == ElementState::Released {
+                        } else if focused && state == ElementState::Released {
                             let correction = if button == MouseButton::Left {
                                 0.01
                             } else {
@@ -284,8 +214,8 @@ impl Engine {
                             };
                             let direction = self.camera.cam.direction().normalize();
                             let origin = self.camera.cam.position;
-                            let ray = Ray::new(origin, direction);
-                            let building_range = 0.0..5.0;
+                            let ray = Ray::new(origin, direction.normalize());
+                            let building_range = 0.0..PLAYER_BUILDING_REACH;
                             if let Some(distance) = self.world.cast_ray(&ray, &building_range) {
                                 let hit = ray.point_on_ray(distance + correction);
                                 let pos = WorldPosition::from(&hit);
@@ -316,6 +246,7 @@ impl Engine {
                             Some(VirtualKeyCode::Escape) => {
                                 grabbed = false;
                                 cursor_visible = true;
+                                focused = false;
                                 window.set_cursor_grab(false).expect("Cursor lock failed");
                                 window.set_cursor_visible(true);
                             }
@@ -343,19 +274,21 @@ impl Engine {
                         }),
                     ..
                 } => {
-                    let pressed = state == ElementState::Pressed;
+                    if focused {
+                        let pressed = state == ElementState::Pressed;
 
-                    if pressed {
-                        match virtual_keycode {
-                            Some(VirtualKeyCode::F1) => {
-                                unsafe { app.recreate_swapchain(&window) }.unwrap();
+                        if pressed {
+                            match virtual_keycode {
+                                Some(VirtualKeyCode::F1) => {
+                                    unsafe { app.recreate_swapchain(&window) }.unwrap();
+                                }
+                                _ => {}
                             }
-                            _ => {}
                         }
-                    }
 
-                    if let Some(key) = virtual_keycode {
-                        self.camera.input.set_key(key, pressed);
+                        if let Some(key) = virtual_keycode {
+                            self.camera.input.set_key(key, pressed);
+                        }
                     }
                 }
                 _ => {}
@@ -442,9 +375,13 @@ impl Engine {
         }
     }
 
-    fn load_chunks(&mut self, generators: &WorkingQueue<ChunkGenerationInput, GeneratedChunk>) {
+    fn load_chunks(&mut self, thread_pool: &ThreadPool, parking_lot: mpsc::Sender<GeneratedChunk>) {
         let center = WorldPosition::from(&self.camera.cam.position);
-        let ids = get_chunks_to_render(&center, CHUNK_SIZE_I * 4, &self.world.chunk_manager.ids);
+        let ids = get_chunks_to_render(&center, RENDER_DISTANCE, self.world.chunk_manager.ids());
+
+        for id in ids.iter() {
+            self.world.chunk_manager.set_requested(id);
+        }
 
         let input: Vec<ChunkGenerationInput> = ids
             .iter()
@@ -452,11 +389,12 @@ impl Engine {
             .map(|id| (self.world.seed.clone(), id.clone()))
             .collect();
 
-        let (lock, condition) = &*generators.sender;
-        if let Ok(ref mut mutex) = lock.try_lock() {
-            self.world.chunk_manager.ids.extend(ids.clone());
-            mutex.extend(input);
-            condition.notify_all();
+        for entry in input {
+            let tx = parking_lot.clone();
+            thread_pool.execute(move || {
+                let chunk = generate_chunk(&entry);
+                tx.send(chunk).unwrap();
+            });
         }
     }
 }

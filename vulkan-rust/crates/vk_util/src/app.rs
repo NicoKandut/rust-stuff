@@ -188,8 +188,7 @@ impl App {
 
         let color_clear_value = vk::ClearValue {
             color: vk::ClearColorValue {
-                float32: [0.0, 0.0, 0.0, 0.0],
-                // float32: [0.3, 0.5, 0.6, 0.0],
+                float32: palette::sky().into(),
             },
         };
 
@@ -410,8 +409,14 @@ impl App {
 
         self.device
             .destroy_descriptor_set_layout(self.data.descriptor_set_layout, None);
+
+        self.free_chunk_memory();
+
+        // index
         self.device.destroy_buffer(self.data.index_buffer, None);
         self.device.free_memory(self.data.index_buffer_memory, None);
+
+        // vertex
         self.device.destroy_buffer(self.data.vertex_buffer, None);
         self.device
             .free_memory(self.data.vertex_buffer_memory, None);
@@ -439,6 +444,22 @@ impl App {
         }
 
         self.instance.destroy_instance(None);
+    }
+
+    pub unsafe fn free_chunk_memory(&mut self) {
+        for (_, buffer) in &self.data.chunk_index_buffer {
+            self.device.destroy_buffer(*buffer, None);
+        }
+        for (_, memory) in &self.data.chunk_index_buffer_memory {
+            self.device.free_memory(*memory, None);
+        }
+
+        for (_, buffer) in &self.data.chunk_vertex_buffers {
+            self.device.destroy_buffer(*buffer, None);
+        }
+        for (_, memory) in &self.data.chunk_vertex_buffers_memory {
+            self.device.free_memory(*memory, None);
+        }
     }
 
     unsafe fn destroy_swapchain(&mut self) {

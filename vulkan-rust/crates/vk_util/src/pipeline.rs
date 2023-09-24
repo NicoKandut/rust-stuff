@@ -4,8 +4,11 @@ use graphics::Vertex;
 use vulkanalia::prelude::v1_0::*;
 
 pub unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()> {
-    let vert = include_bytes!("../../../shader/vert.spv");
-    let frag = include_bytes!("../../../shader/frag.spv");
+    let vert = std::fs::read("./shader/vert.spv").unwrap();
+    let frag = std::fs::read("./shader/frag.spv").unwrap();
+
+    // let vert = include_bytes!("../../../shader/vert.spv");
+    // let frag = include_bytes!("../../../shader/frag.spv");
 
     let vert_shader_module = create_shader_module(device, &vert[..])?;
     let frag_shader_module = create_shader_module(device, &frag[..])?;

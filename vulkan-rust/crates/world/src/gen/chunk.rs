@@ -10,6 +10,8 @@ use gamedata::material::Material;
 
 use super::boulder::Boulder;
 
+const CAVE_THRESHOLD: f32 = 0.002;
+
 pub struct Chunk {
     seed: PositionalSeed,
     #[allow(unused)]
@@ -248,11 +250,14 @@ fn generate_caves(
     for z in 0..CHUNK_SIZE_SAFE {
         for y in 0..CHUNK_SIZE_SAFE {
             for x in 0..CHUNK_SIZE_SAFE {
-                if cave_slice[z * CHUNK_SIZE_SAFE_SQUARED + y * CHUNK_SIZE_SAFE + x] < 0.02
-                    && data.get(x, y, z) != Material::Air
+                if cave_slice[z * CHUNK_SIZE_SAFE_SQUARED + y * CHUNK_SIZE_SAFE + x]
+                    < CAVE_THRESHOLD
                 {
-                    data.set(x, y, z, Material::Air);
-                    *block_count -= 1;
+                    let material = data.get(x, y, z);
+                    if material.is_solid() {
+                        data.set(x, y, z, Material::Air);
+                        *block_count -= 1;
+                    }
                 }
             }
         }

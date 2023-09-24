@@ -64,13 +64,12 @@ pub fn wave(x_start: i32, y_start: i32, size: usize) -> Vec<f32> {
     result
 }
 
-#[allow(unused)]
 pub fn caves(seed: &WorldSeed, x: i32, y: i32, z: i32, size: usize) -> Vec<f32> {
     let (noise, _min, _max) =
         NoiseBuilder::turbulence_3d_offset(x as f32, size, y as f32, size, z as f32, size)
             .with_seed(noise_id::CAVES + i32::from(seed))
             .with_freq(0.008)
-            .with_octaves(3)
+            .with_octaves(2)
             .with_gain(2.0)
             .with_lacunarity(0.5)
             .generate();

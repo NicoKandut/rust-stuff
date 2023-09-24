@@ -8,12 +8,12 @@ use vulkanalia::vk::{self, HasBuilder};
 #[derive(Copy, Clone, Debug)]
 pub struct Vertex {
     pub pos: glm::Vec3,
-    pub color: glm::Vec3,
+    pub color: glm::Vec4,
     pub normal: glm::Vec3,
 }
 
 impl Vertex {
-    pub fn new(pos: glm::Vec3, color: glm::Vec3, normal: glm::Vec3) -> Self {
+    pub fn new(pos: glm::Vec3, color: glm::Vec4, normal: glm::Vec3) -> Self {
         Self { pos, color, normal }
     }
 

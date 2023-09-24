@@ -11,6 +11,13 @@ pub struct Ray {
 
 impl Ray {
     pub fn new(origin: Vec3, direction: Vec3) -> Self {
+        assert!(!direction.x.is_nan());
+        assert!(!direction.y.is_nan());
+        assert!(!direction.z.is_nan());
+        assert!(direction.norm() > 0.0);
+
+        let direction = direction.normalize();
+
         Self {
             origin,
             direction,

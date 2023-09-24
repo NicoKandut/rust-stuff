@@ -652,11 +652,12 @@ dependencies = [
  "lazy_static",
  "log",
  "nalgebra-glm",
+ "palette",
  "png 0.16.8",
  "pretty_env_logger",
- "rayon",
  "simdnoise",
  "thiserror",
+ "threadpool 0.1.0",
  "tobj",
  "vk_util",
  "vulkanalia",
@@ -721,7 +722,7 @@ dependencies = [
  "lebe",
  "miniz_oxide 0.6.2",
  "smallvec",
- "threadpool",
+ "threadpool 1.8.1",
  "zune-inflate",
 ]
 
@@ -850,6 +851,7 @@ name = "gamedata"
 version = "0.0.0"
 dependencies = [
  "nalgebra-glm",
+ "palette",
 ]
 
 [[package]]
@@ -1761,6 +1763,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "palette"
+version = "0.0.0"
+dependencies = [
+ "nalgebra-glm",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2401,6 +2410,10 @@ dependencies = [
 
 [[package]]
 name = "threadpool"
+version = "0.1.0"
+
+[[package]]
+name = "threadpool"
 version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
@@ -2562,6 +2575,7 @@ dependencies = [
  "graphics",
  "log",
  "nalgebra-glm",
+ "palette",
  "png 0.16.8",
  "thiserror",
  "vulkanalia",

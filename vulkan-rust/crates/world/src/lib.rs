@@ -119,6 +119,10 @@ impl World {
             );
         }
     }
+
+    pub fn reset(&mut self) {
+        self.chunk_manager.reset();
+    }
 }
 
 pub trait Raycast {
@@ -127,6 +131,7 @@ pub trait Raycast {
 
 impl Raycast for World {
     fn cast_ray(&self, ray: &Ray, limit: &Range<f32>) -> Option<f32> {
+        // println!("Ray: {:?}", ray);
         let step_x = if ray.direction.x >= 0.0 { 1 } else { -1 };
         let step_y = if ray.direction.y >= 0.0 { 1 } else { -1 };
         let step_z = if ray.direction.z >= 0.0 { 1 } else { -1 };
@@ -166,6 +171,8 @@ impl Raycast for World {
                 chunk_id = z_chunk_id;
                 continue;
             }
+
+            break;
         }
 
         None

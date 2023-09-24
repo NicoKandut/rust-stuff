@@ -25,7 +25,7 @@ pub fn load_model(data: &mut AppData) -> Result<()> {
                     model.mesh.positions[pos_offset + 1],
                     model.mesh.positions[pos_offset + 2],
                 ),
-                glm::vec3(1.0, 1.0, 1.0),
+                palette::white(),
                 glm::vec3(1.0, 1.0, 1.0), //TODO: take normal from mesh
             );
 

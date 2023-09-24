@@ -17,11 +17,12 @@ thiserror = "1"
 tobj = "2"
 vulkanalia = { version = "=0.14.0", features = ["libloading", "window"] }
 winit = "0.24"
-gamedata = {path = "../gamedata", version = "0.0.0"}
-world = {path = "../world", version = "0.0.0"}
-graphics = {path = "../graphics", version = "0.0.0"}
-vk_util = {path = "../vk_util", version = "0.0.0"}
+gamedata = { path = "../gamedata" }
+threadpool = { path = "../threadpool" }
+world = { path = "../world" }
+graphics = { path = "../graphics" }
+palette = { path = "../palette" }
+vk_util = { path = "../vk_util" }
 simdnoise = "3.1.6"
-rayon = "1.6.1"
 egui = "0.22.0"
 egui-winit = "0.22.0"

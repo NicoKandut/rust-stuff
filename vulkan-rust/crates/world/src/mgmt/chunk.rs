@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::{chunk_id::ChunkId, ChunkData};
 
 pub struct ChunkManager {
-    pub ids: BTreeSet<ChunkId>,
-    pub chunks: BTreeMap<ChunkId, Box<ChunkData>>,
+    ids: BTreeSet<ChunkId>,
+    chunks: BTreeMap<ChunkId, Box<ChunkData>>,
 }
 
 impl ChunkManager {
@@ -21,6 +21,10 @@ impl ChunkManager {
 
     pub fn insert_data(&mut self, id: &ChunkId, data: ChunkData) {
         self.chunks.insert(id.clone(), Box::new(data));
+    }
+
+    pub fn set_requested(&mut self, id: &ChunkId) {
+        self.ids.insert(id.clone());
     }
 
     pub fn get_data(&self, id: &ChunkId) -> Option<&ChunkData> {
@@ -44,12 +48,17 @@ impl ChunkManager {
     pub(crate) fn get_all(&self) -> Vec<(&ChunkId, &Box<ChunkData>)> {
         self.chunks.iter().filter(|c| !c.1.is_empty()).collect()
     }
+
+    pub(crate) fn reset(&mut self) {
+        self.ids.clear();
+        self.chunks.clear();
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::{ChunkId, ChunkManager};
-    use crate::{ChunkData, traits::Data3D};
+    use crate::{traits::Data3D, ChunkData};
     use gamedata::material::Material;
 
     #[test]

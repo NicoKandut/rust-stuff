@@ -96,6 +96,8 @@ pub unsafe fn create_chunk_vertex_buffer(
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
     )?;
 
+    device.device_wait_idle().unwrap();
+
     let prev_buffer = data.chunk_vertex_buffers.insert(id.clone(), vertex_buffer);
     if let Some(b) = prev_buffer {
         // TODO: is destroying correct?
@@ -247,6 +249,8 @@ pub unsafe fn create_chunk_index_buffer(
         vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
     )?;
+
+    device.device_wait_idle().unwrap();
 
     let prev_buffer = data.chunk_index_buffer.insert(id.clone(), index_buffer);
     if let Some(b) = prev_buffer {
