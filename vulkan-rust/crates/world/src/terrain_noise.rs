@@ -10,14 +10,18 @@ mod noise_id {
 }
 
 pub fn height(seed: &WorldSeed, offset_x: i32, offset_y: i32, size: usize) -> Vec<f32> {
-    let (mut noise, _min, _max) =
-        NoiseBuilder::fbm_2d_offset(offset_x as f32, size, offset_y as f32, size)
-            .with_seed(noise_id::HEIGHT + i32::from(seed))
-            .with_freq(0.17)
-            .with_octaves(11)
-            .with_gain(2.0)
-            .with_lacunarity(0.5)
-            .generate();
+    let seed_offset_x = u64::from(seed) & 0xFFFF;
+    let seed_offset_y = (u64::from(seed) >> 32) & 0xFFFF;
+    let x = offset_x as f32 + seed_offset_x as f32;
+    let y = offset_y as f32 + seed_offset_y as f32;
+
+    let (mut noise, _min, _max) = NoiseBuilder::fbm_2d_offset(x as f32, size, y as f32, size)
+        .with_seed(noise_id::HEIGHT + i32::from(seed))
+        .with_freq(0.17)
+        .with_octaves(11)
+        .with_gain(2.0)
+        .with_lacunarity(0.5)
+        .generate();
 
     noise.iter_mut().for_each(|x| *x *= 10.0);
 
@@ -64,7 +68,12 @@ pub fn wave(x_start: i32, y_start: i32, size: usize) -> Vec<f32> {
     result
 }
 
-pub fn caves(seed: &WorldSeed, x: i32, y: i32, z: i32, size: usize) -> Vec<f32> {
+pub fn caves(seed: &WorldSeed, offset_x: i32, offset_y: i32, z: i32, size: usize) -> Vec<f32> {
+    let seed_offset_x = u64::from(seed) & 0xFFFF;
+    let seed_offset_y = (u64::from(seed) >> 32) & 0xFFFF;
+    let x = offset_x as f32 + seed_offset_x as f32;
+    let y = offset_y as f32 + seed_offset_y as f32;
+
     let (noise, _min, _max) =
         NoiseBuilder::turbulence_3d_offset(x as f32, size, y as f32, size, z as f32, size)
             .with_seed(noise_id::CAVES + i32::from(seed))

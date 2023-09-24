@@ -40,7 +40,7 @@ struct GeneratedChunk(ChunkId, ChunkData, Option<Mesh>);
 
 type ChunkGenerationInput = (WorldSeed, ChunkId);
 
-const RENDER_DISTANCE: i32 = CHUNK_SIZE_I * 8;
+const RENDER_DISTANCE: i32 = CHUNK_SIZE_I * 16;
 const PLAYER_BUILDING_REACH: f32 = 10.0;
 
 fn generate_chunk(input: &ChunkGenerationInput) -> GeneratedChunk {
@@ -102,15 +102,16 @@ impl Engine {
 
         // world_collision
         if self.camera.movement.velocity.norm() >= 0.01 {
-            let desired_movement_amount = self.camera.movement.velocity.norm() * *delta_time;
+            let desired_movement_amount = self.camera.movement.velocity.norm() * 10.0 * *delta_time;
             let direction = self.camera.movement.velocity.normalize();
             let ray = Ray::new(self.camera.cam.position, direction);
             let movement_range = 0.0..1.0;
 
-            let allowed_movement_amount = match self.world.cast_ray(&ray, &movement_range) {
-                Some(distance) => desired_movement_amount.min(distance - 0.5),
-                None => desired_movement_amount,
-            };
+            // let allowed_movement_amount = match self.world.cast_ray(&ray, &movement_range) {
+            //     Some(distance) => desired_movement_amount.min(distance - 0.5),
+            //     None => desired_movement_amount,
+            // };
+            let allowed_movement_amount = desired_movement_amount;
 
             self.camera.cam.position += direction * allowed_movement_amount;
         }
@@ -385,7 +386,7 @@ impl Engine {
 
         let input: Vec<ChunkGenerationInput> = ids
             .iter()
-            // .filter(|id| id.x >= 0 && id.y >= 0 && id.z >= 0)
+            .filter(|id| id.x >= 0 && id.y >= 0 && id.z >= 0 && id.z < 8)
             .map(|id| (self.world.seed.clone(), id.clone()))
             .collect();
 
