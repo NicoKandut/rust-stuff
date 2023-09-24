@@ -35,14 +35,14 @@ impl Vertex {
         let color = vk::VertexInputAttributeDescription::builder()
             .binding(0)
             .location(1)
-            .format(vk::Format::R32G32B32_SFLOAT)
+            .format(vk::Format::R32G32B32A32_SFLOAT)
             .offset(size_of::<glm::Vec3>() as u32)
             .build();
         let normal = vk::VertexInputAttributeDescription::builder()
             .binding(0)
             .location(2)
             .format(vk::Format::R32G32B32_SFLOAT)
-            .offset(2 * size_of::<glm::Vec3>() as u32)
+            .offset(size_of::<glm::Vec3>() as u32 + size_of::<glm::Vec4>() as u32)
             .build();
 
         [pos, color, normal]

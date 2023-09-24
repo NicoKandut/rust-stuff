@@ -10,6 +10,6 @@ layout(location = 1) in vec3 fragNormal;
 layout(location = 0) out vec4 outColor;
 
 void main() {
-    outColor = vec4(fragColor.xyz * clamp(dot(fragNormal, pcs.light), 0.8, 1), 1);
-    // outColor = vec4(fragColor, 1);
+    outColor = vec4(fragColor.xyz * clamp(dot(fragNormal, pcs.light), 0.6, 1), 1);
+    // outColor = fragColor;
 }
