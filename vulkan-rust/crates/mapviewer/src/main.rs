@@ -1,4 +1,4 @@
-use world::{chunk_generator::ChunkGenerator, chunk_id::ChunkId};
+use world::{gen::chunk::ChunkGenerator, ChunkId};
 
 const MATERIAL_COLORS: [[u8; 3]; 10] = [
     [0, 0, 255],

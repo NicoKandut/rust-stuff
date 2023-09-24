@@ -28,7 +28,7 @@ use vulkanalia::{
     window as vk_window,
 };
 use winit::window::Window;
-use world::{chunk_id::ChunkId, world_position::WorldPosition, World};
+use world::{ChunkId, World, WorldPosition};
 
 #[derive(Clone, Debug)]
 pub struct App {
@@ -366,7 +366,7 @@ impl App {
         let mut proj = glm::perspective_rh_zo(
             self.data.swapchain_extent.width as f32 / self.data.swapchain_extent.height as f32,
             glm::radians(&glm::vec1(45.0))[0],
-            0.5,
+            0.1, // must be smaller than player collision radius
             2000.,
         );
         proj[(1, 1)] *= -1.0;

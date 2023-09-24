@@ -8,7 +8,7 @@ use anyhow::Result;
 use graphics::{Mesh, Vertex};
 use std::{mem::size_of, ptr::copy_nonoverlapping as memcpy};
 use vulkanalia::prelude::v1_0::*;
-use world::chunk_id::ChunkId;
+use world::ChunkId;
 
 pub unsafe fn create_vertex_buffer(
     instance: &Instance,

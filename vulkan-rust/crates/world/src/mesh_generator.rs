@@ -8,11 +8,14 @@ use gamedata::material::Material;
 use graphics::{Mesh, Vertex};
 
 use crate::{
-    chunk_generator::Slice3, chunk_id::ChunkId, ChunkData, CHUNK_SIZE, CHUNK_SIZE_SAFE,
+    chunk_id::ChunkId, slice::CubeSlice, traits::Data3D, ChunkData, CHUNK_SIZE, CHUNK_SIZE_SAFE,
     CHUNK_SIZE_SQUARED,
 };
 
-pub fn generate_greedy_mesh(id: &ChunkId, data: &Slice3<Material, CHUNK_SIZE_SAFE>) -> Mesh {
+pub fn generate_greedy_mesh<T>(id: &ChunkId, data: &T) -> Mesh
+where
+    T: Data3D<Material>,
+{
     let mut mesh = Mesh::default();
     let mut vertex_count = 0;
 
@@ -25,7 +28,7 @@ pub fn generate_greedy_mesh(id: &ChunkId, data: &Slice3<Material, CHUNK_SIZE_SAF
 
         let mut x = [0; 3];
         let mut x2 = [0; 3];
-        x[d] = 1;
+        x[d] = 2;
 
         // look at all layers
         while x[d] < CHUNK_SIZE_SAFE {
@@ -39,8 +42,8 @@ pub fn generate_greedy_mesh(id: &ChunkId, data: &Slice3<Material, CHUNK_SIZE_SAF
                 while x[u] < (CHUNK_SIZE_SAFE - 1) {
                     x2 = x;
                     x2[d] -= 1;
-                    let cur_mat = data[x[0]][x[1]][x[2]];
-                    let prev_mat = data[x2[0]][x2[1]][x2[2]];
+                    let cur_mat = data.get(x[0], x[1], x[2]);
+                    let prev_mat = data.get(x2[0], x2[1], x2[2]);
                     let face_type_c = match (cur_mat.is_opaque(), prev_mat.is_opaque()) {
                         (true, true) => None,
                         (true, false) => Some((cur_mat, true)),
@@ -158,14 +161,23 @@ mod test {
 
     use gamedata::material::Material;
 
-    use crate::{chunk_generator::ChunkGenerator, chunk_id::ChunkId, CHUNK_SIZE_SAFE};
+    use crate::{
+        chunk_id::ChunkId,
+        gen::chunk::Chunk,
+        seed::{PositionalSeed, WorldSeed},
+        slice::CubeSlice,
+        traits::{Data3D, Generate, Voxelize},
+        CHUNK_SIZE_SAFE,
+    };
 
     use super::generate_greedy_mesh;
+
+    const WORLD_SEED: WorldSeed = WorldSeed::new(17);
 
     #[test]
     fn empty() {
         let id = ChunkId::new(17, 17, 17);
-        let mut data = [[[Material::Air; CHUNK_SIZE_SAFE]; CHUNK_SIZE_SAFE]; CHUNK_SIZE_SAFE];
+        let mut data = CubeSlice::<Material, CHUNK_SIZE_SAFE>::default();
         let mesh = generate_greedy_mesh(&id, &data);
         assert_eq!(mesh.vertices.len(), 0);
         assert_eq!(mesh.indices.len(), 0);
@@ -174,7 +186,7 @@ mod test {
     #[test]
     fn borders_mesh_to_empty() {
         let id = ChunkId::new(17, 17, 17);
-        let mut data = [[[Material::Air; CHUNK_SIZE_SAFE]; CHUNK_SIZE_SAFE]; CHUNK_SIZE_SAFE];
+        let mut data = CubeSlice::<Material, CHUNK_SIZE_SAFE>::default();
         for d in 0..3 {
             let u = (d + 1) % 3;
             let v = (d + 2) % 3;
@@ -184,16 +196,16 @@ mod test {
 
                 x[u] = 0;
                 x[v] = 0;
-                data[x[0]][x[1]][x[2]] = Material::Stone;
+                data.set(x[0], x[1], x[2], Material::Stone);
                 x[u] = 0;
                 x[v] = 65;
-                data[x[0]][x[1]][x[2]] = Material::Stone;
+                data.set(x[0], x[1], x[2], Material::Stone);
                 x[u] = 65;
                 x[v] = 0;
-                data[x[0]][x[1]][x[2]] = Material::Stone;
+                data.set(x[0], x[1], x[2], Material::Stone);
                 x[u] = 65;
                 x[v] = 65;
-                data[x[0]][x[1]][x[2]] = Material::Stone;
+                data.set(x[0], x[1], x[2], Material::Stone);
             }
         }
 
@@ -205,8 +217,8 @@ mod test {
     #[test]
     fn single_block() {
         let id = ChunkId::new(17, 17, 17);
-        let mut data = [[[Material::Air; CHUNK_SIZE_SAFE]; CHUNK_SIZE_SAFE]; CHUNK_SIZE_SAFE];
-        data[1][1][1] = Material::Stone;
+        let mut data = CubeSlice::<Material, CHUNK_SIZE_SAFE>::default();
+        data.set(1, 1, 1, Material::Stone);
         let mesh = generate_greedy_mesh(&id, &data);
         assert_eq!(mesh.vertices.len(), 24);
         assert_eq!(mesh.indices.len(), 36);
@@ -217,23 +229,47 @@ mod test {
         }
     }
 
+    #[test]
+    fn greedy_block_2() {
+        let id = ChunkId::new(17, 17, 17);
+        let mut data = CubeSlice::<Material, CHUNK_SIZE_SAFE>::default();
+        data.set(1, 1, 1, Material::Stone);
+        data.set(1, 1, 2, Material::Stone);
+        data.set(1, 2, 1, Material::Stone);
+        data.set(1, 2, 2, Material::Stone);
+        data.set(2, 1, 1, Material::Stone);
+        data.set(2, 1, 2, Material::Stone);
+        data.set(2, 2, 1, Material::Stone);
+        data.set(2, 2, 2, Material::Stone);
+        let mesh = generate_greedy_mesh(&id, &data);
+        assert_eq!(mesh.vertices.len(), 24);
+        assert_eq!(mesh.indices.len(), 36);
+        for v in mesh.vertices {
+            assert!(v.pos.x >= 0.0 && v.pos.x <= 2.0);
+            assert!(v.pos.y >= 0.0 && v.pos.y <= 2.0);
+            assert!(v.pos.z >= 0.0 && v.pos.z <= 2.0);
+        }
+    }
+
     #[bench]
     fn single_chunk_meshing17(b: &mut Bencher) {
         let id = ChunkId::new(17, 17, 17);
-        let data = ChunkGenerator::new().generate(&id);
+        let chunk_seed = PositionalSeed::for_chunk(&WORLD_SEED, &id);
+        let data = Chunk::generate(chunk_seed).voxelize();
 
         b.iter(|| {
-            test::black_box(generate_greedy_mesh(&id, &data.0));
+            test::black_box(generate_greedy_mesh(&id, &data.voxels));
         });
     }
 
     #[bench]
     fn single_chunk_meshing0(b: &mut Bencher) {
         let id = ChunkId::new(0, 0, 0);
-        let data = ChunkGenerator::new().generate(&id);
+        let chunk_seed = PositionalSeed::for_chunk(&WORLD_SEED, &id);
+        let data = Chunk::generate(chunk_seed).voxelize();
 
         b.iter(|| {
-            test::black_box(generate_greedy_mesh(&id, &data.0));
+            test::black_box(generate_greedy_mesh(&id, &data.voxels));
         });
     }
 }

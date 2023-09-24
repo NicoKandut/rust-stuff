@@ -6,7 +6,7 @@ use anyhow::Result;
 use graphics::Vertex;
 use std::{collections::BTreeMap, mem::size_of};
 use vulkanalia::prelude::v1_0::*;
-use world::chunk_id::ChunkId;
+use world::ChunkId;
 
 /// The Vulkan handles and associated properties used by our Vulkan app.
 #[derive(Clone, Debug, Default)]

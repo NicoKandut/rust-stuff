@@ -2,7 +2,7 @@ use crate::node::Node;
 
 #[derive(Default, Debug)]
 pub struct NodeManager {
-    nodes: Vec<NodeRc>,
+    pub nodes: Vec<NodeRc>,
 }
 
 #[derive(Debug)]
@@ -61,6 +61,7 @@ impl NodeManager {
     /**
      * Attempts to remve a node from the node manager. Returns true if it was removed and false otherwise.
      */
+    #[allow(unused)]
     pub fn remove(&mut self, node: &Node) -> bool {
         if let Some(index) = self.index_of(&node) {
             self.nodes[index].dec_use();
@@ -199,35 +200,37 @@ mod tests {
     fn size_of_random_chunk_3_materials() {
         let chunk_size = 64;
         let materials = 3;
+        let chunk_count = 2;
 
         let mut manager = NodeManager::default();
         let mut random = rand::thread_rng();
 
-        for _z in 0..(chunk_size / 2) {
-            for _y in 0..(chunk_size / 2) {
-                for _x in 0..(chunk_size / 2) {
-                    manager.add(Node::new([
-                        random.gen_range(0..materials),
-                        random.gen_range(0..materials),
-                        random.gen_range(0..materials),
-                        random.gen_range(0..materials),
-                        random.gen_range(0..materials),
-                        random.gen_range(0..materials),
-                        random.gen_range(0..materials),
-                        random.gen_range(0..materials),
-                    ]));
+        for _i in 0..chunk_count {
+            for _z in 0..(chunk_size / 2) {
+                for _y in 0..(chunk_size / 2) {
+                    for _x in 0..(chunk_size / 2) {
+                        manager.add(Node::new([
+                            random.gen_range(0..materials),
+                            random.gen_range(0..materials),
+                            random.gen_range(0..materials),
+                            random.gen_range(0..materials),
+                            random.gen_range(0..materials),
+                            random.gen_range(0..materials),
+                            random.gen_range(0..materials),
+                            random.gen_range(0..materials),
+                        ]));
+                    }
                 }
             }
         }
 
-        // println!("{:#?}", manager);
         println!(
-            "Raw: {} blocks ({} byte)",
-            chunk_size * chunk_size * chunk_size,
-            chunk_size * chunk_size * chunk_size * size_of::<usize>()
+            "Raw Array: {} blocks ({} byte)",
+            chunk_count * chunk_size * chunk_size * chunk_size,
+            chunk_count * chunk_size * chunk_size * chunk_size * size_of::<u8>()
         );
         println!(
-            "NodeManager: {} nodes ({} byte)",
+            "With Manager: {} nodes ({} byte)",
             manager.nodes.len(),
             manager.nodes.len() * size_of::<Node>()
         );

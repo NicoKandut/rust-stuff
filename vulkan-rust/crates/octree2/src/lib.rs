@@ -11,6 +11,8 @@ use position::{Position, CHUNK_SIZE};
 pub const AIR: usize = 0x8000000000000000;
 pub const STONE: usize = 0x8000000000000001;
 pub const CHANGING: usize = 0x8000000000000002;
+pub const DIRT: usize = 0x8000000000000003;
+pub const GRASS: usize = 0x8000000000000004;
 
 mod manager;
 mod node;
@@ -18,13 +20,12 @@ mod position;
 
 #[derive(Default)]
 pub struct World {
-    manager: NodeManager,
+    pub manager: NodeManager,
     chunk_roots: HashMap<Position, usize>,
 }
 
 impl World {
     pub fn get_block(&mut self, position: &Position) -> usize {
-        println!("Getting at {position:?}");
         let chunk_position = position.rounded_to(CHUNK_SIZE);
 
         match self.chunk_roots.get(&chunk_position) {
@@ -32,11 +33,15 @@ impl World {
                 let mut current_node_id = *chunk_id;
                 let mut current_size = CHUNK_SIZE;
 
-                while !is_material(current_node_id) && current_size > 1 {
+                while !is_material(current_node_id) {
                     if let Some(node) = self.manager.get(&current_node_id) {
                         let relative_position = position.relative_to(current_size);
                         let child_index = relative_position.to_child_index(current_size);
                         let child_id = node.get_child_id(child_index);
+                        println!(
+                            "Child: {} ({:?}/{:?})",
+                            child_index, position, relative_position
+                        );
                         current_node_id = child_id;
                         current_size /= 2;
                     } else {
@@ -57,18 +62,19 @@ impl World {
 
     pub fn add_block(&mut self, position: &Position, material: usize) -> bool {
         let chunk_position = position.rounded_to(CHUNK_SIZE);
-        println!("Chunk position: {chunk_position:?}");
+        // println!("Chunk position: {chunk_position:?}");
         let chunk_root_id = self.get_chunk_root(chunk_position);
-        println!("Found chunk {chunk_root_id}");
+        // println!("Found chunk {chunk_root_id}");
 
         let mut current_node_id = chunk_root_id;
         let mut current_size = CHUNK_SIZE;
-        let mut child_index = 0;
+        let mut child_index;
 
         while current_size > 2 {
             let relative_position = position.relative_to(current_size);
             child_index = relative_position.to_child_index(current_size);
-            println!("Lookup: relative: {:?}", relative_position);
+            // println!("Child: {}", child_index);
+            // println!("Lookup: relative: {:?}", relative_position);
             current_node_id = match self.manager.get(&current_node_id) {
                 Some(node) => {
                     let child_id = node.get_child_id(child_index);
@@ -77,19 +83,16 @@ impl World {
                             .set_child_of(&current_node_id, &child_index, &CHANGING);
                         let mut new_node = Node::new_air();
                         new_node.set_child(&child_index, &child_id);
-                        println!("  Found material, expanding deeper {new_node:?}");
                         let new_child_id = self.manager.add(new_node);
                         self.manager
                             .set_child_of(&current_node_id, &child_index, &new_child_id);
 
                         new_child_id
                     } else {
-                        println!("  Node exists, lookup success");
                         child_id
                     }
                 }
                 None => {
-                    println!("  Failed, adding new node as child of {current_node_id}");
                     let child_id = self.manager.add(Node::new_air());
                     self.manager
                         .set_child_of(&current_node_id, &child_index, &child_id);
@@ -106,17 +109,16 @@ impl World {
 
         let relative_position = position.relative_to(current_size);
         child_index = relative_position.to_child_index(current_size);
-        if node.get_child_id(child_index) == material {
-            println!("Replacing here");
-        }
+        // println!("Child: {}", child_index);
 
-        println!("Inserting {material} at {position:?}");
+        if node.get_child_id(child_index) == material {
+            // println!("Replacing here");
+        }
 
         self.manager
             .set_child_of(&current_node_id, &child_index, &material);
 
-        println!("CHUNKS: {:#?}", self.chunk_roots);
-        println!("NODES: {:#?}", self.manager.nodes());
+        // println!("Nodes: {:#?}", self.manager.nodes());
 
         return true;
 
@@ -144,7 +146,11 @@ fn is_material(node_id: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::{position::Position, World, AIR, STONE};
+    use std::mem::size_of;
+
+    use rand::Rng;
+
+    use crate::{node::Node, position::Position, World, AIR, DIRT, GRASS, STONE};
 
     #[test]
     fn adding_blocks_works() {
@@ -152,7 +158,7 @@ mod tests {
 
         let p1 = Position::new(0, 0, 0);
         let p2 = Position::new(0, 10, 0);
-        let p3 = Position::new(0, 0, -10);
+        let p3 = Position::new(0, 1, -10);
         world.add_block(&p1, STONE);
         world.add_block(&p2, STONE);
         world.add_block(&p3, STONE);
@@ -173,5 +179,41 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn memory_footprint() {
+        let range_x = -64..64;
+        let range_y = -64..64;
+        let range_z = -64..64;
+
+        let mut world = World::default();
+        let mut random = rand::thread_rng();
+
+        let mut p = Position::new(0, 0, 0);
+        const MATERIALS: [usize; 4] = [AIR, STONE, GRASS, DIRT];
+        const MATERIAL_COUNT: usize = MATERIALS.len();
+
+        for z in range_x.clone() {
+            p.z = z;
+            for y in range_y.clone() {
+                p.y = y;
+                for x in range_z.clone() {
+                    p.x = x;
+                    world.add_block(&p, MATERIALS[random.gen_range(0..MATERIAL_COUNT)]);
+                }
+            }
+        }
+
+        println!(
+            "Raw Array: {} blocks ({} byte)",
+            range_x.len() * range_y.len() * range_z.len(),
+            range_x.len() * range_y.len() * range_z.len() * size_of::<u8>()
+        );
+        println!(
+            "With Manager: {} nodes ({} byte)",
+            world.manager.nodes.len(),
+            world.manager.nodes.len() * size_of::<Node>()
+        );
     }
 }

@@ -49,7 +49,7 @@ impl ChunkManager {
 #[cfg(test)]
 mod test {
     use super::{ChunkId, ChunkManager};
-    use crate::ChunkData;
+    use crate::{ChunkData, traits::Data3D};
     use gamedata::material::Material;
 
     #[test]
@@ -80,6 +80,6 @@ mod test {
         let chunk = cm.get_mut(&id).unwrap();
 
         chunk.set(0, 0, 0, Material::Stone);
-        assert_eq!(chunk.get(0, 0, 0), Some(Material::Stone));
+        assert_eq!(chunk.get(0, 0, 0), Material::Stone);
     }
 }

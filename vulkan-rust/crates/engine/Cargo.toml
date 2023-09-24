@@ -23,3 +23,5 @@ graphics = {path = "../graphics", version = "0.0.0"}
 vk_util = {path = "../vk_util", version = "0.0.0"}
 simdnoise = "3.1.6"
 rayon = "1.6.1"
+egui = "0.22.0"
+egui-winit = "0.22.0"

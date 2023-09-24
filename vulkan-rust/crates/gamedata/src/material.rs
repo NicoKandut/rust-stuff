@@ -1,6 +1,10 @@
 const SOLID: u8 = 0b1000_0000;
 const OPAQUE: u8 = 0b0100_0000;
 
+fn rgb(r: u8, g: u8, b: u8) -> [f32; 3] {
+    [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]
+}
+
 /**
  * First 2 bits determine solidity and opacity, all other bits are IDs.
  */
@@ -8,14 +12,19 @@ const OPAQUE: u8 = 0b0100_0000;
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[rustfmt::skip]
 pub enum Material {
-    Air   =                  0,
-    Water =         OPAQUE | 1,
-    Glass = SOLID |          2,
-    Stone = SOLID | OPAQUE | 3,
-    Grass = SOLID | OPAQUE | 4,
-    Sand  = SOLID | OPAQUE | 5,
-    Snow  = SOLID | OPAQUE | 6,
-    Ice   = SOLID | OPAQUE | 7,
+    Unset  =                  0,
+    Air    =                  1,
+    Water  =         OPAQUE | 2,
+    Glass  = SOLID |          3,
+    Stone  = SOLID | OPAQUE | 4,
+    Grass  = SOLID | OPAQUE | 5,
+    Sand   = SOLID | OPAQUE | 6,
+    Snow   = SOLID | OPAQUE | 7,
+    Ice    = SOLID | OPAQUE | 8,
+    Wood   = SOLID | OPAQUE | 9,
+    Leaves = SOLID | OPAQUE | 10,
+    Dirt   = SOLID | OPAQUE | 11,
+    Debug  = SOLID | OPAQUE | 12,
 }
 
 impl Material {
@@ -27,16 +36,24 @@ impl Material {
         (*self as u8 & OPAQUE) != 0
     }
 
+    pub fn is_fillable(&self) -> bool {
+        return (*self as u8) < 2;
+    }
+
     pub fn color(&self) -> [f32; 3] {
         match *self {
-            Self::Air => [0.0, 0.0, 0.0],
-            Self::Water => [0.0, 0.0, 1.0],
+            Self::Air | Self::Unset => [0.0, 0.0, 0.0],
+            Self::Water => rgb(23, 98, 203),
             Self::Glass => [1.0, 1.0, 1.0],
             Self::Stone => [0.3, 0.2, 0.2],
             Self::Grass => [0.1, 0.7, 0.3],
-            Self::Sand => [0.75, 0.7, 0.50],
+            Self::Sand => [0.8, 0.7, 0.5],
             Self::Snow => [0.8, 0.9, 1.],
-            Self::Ice => [0.5, 0.5, 1.],
+            Self::Ice => [0.5, 0.5, 1.0],
+            Self::Wood => [0.5, 0.3, 0.0],
+            Self::Leaves => [0.0, 0.5, 0.0],
+            Self::Dirt => [0.3, 0.2, 0.0],
+            Self::Debug => rgb(255, 0, 0),
         }
     }
 
@@ -46,6 +63,12 @@ impl Material {
             x if x > 0.5 => Self::Grass,
             _ => Self::Air,
         }
+    }
+}
+
+impl Default for Material {
+    fn default() -> Self {
+        Material::Unset
     }
 }
 

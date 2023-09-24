@@ -2,6 +2,7 @@ use crate::aabb::AABB;
 
 pub struct Frustum {
     planes: [glm::Vec4; 4],
+    #[allow(unused)]
     points: [glm::Vec3; 8],
 }
 

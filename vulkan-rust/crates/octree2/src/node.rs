@@ -1,4 +1,4 @@
-use crate::{position::Position, AIR};
+use crate::AIR;
 
 #[derive(Default, PartialEq, Eq, Hash, Clone, Debug)]
 pub struct Node([usize; 8]);

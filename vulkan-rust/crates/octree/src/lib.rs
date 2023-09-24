@@ -2,13 +2,12 @@
 
 extern crate test;
 
-mod next;
-
 /**
  * Generic node in an octree
  */
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Default)]
 pub enum Node<Children, T: Copy + PartialEq> {
+    #[default]
     Empty,
     Sparse(Children),
     Full(T),

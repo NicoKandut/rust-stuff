@@ -21,10 +21,21 @@ impl Position {
     }
 
     pub fn relative_to(&self, size: isize) -> Self {
-        Self::new(self.x % size, self.y % size, self.z % size)
+        Self::new(
+            self.x.rem_euclid(size),
+            self.y.rem_euclid(size),
+            self.z.rem_euclid(size),
+        )
     }
 
     pub fn to_child_index(&self, size: isize) -> usize {
+        assert!(self.x < size);
+        assert!(self.y < size);
+        assert!(self.z < size);
+        assert!(self.x >= 0);
+        assert!(self.y >= 0);
+        assert!(self.z >= 0);
+
         let x_up = self.x >= (size / 2);
         let y_up = self.y >= (size / 2);
         let z_up = self.z >= (size / 2);
@@ -89,5 +100,27 @@ mod tests {
             Position::new(-64, 0, 0).rounded_to(CHUNK_SIZE),
             Position::new(-64, 0, 0)
         );
+    }
+
+    #[test]
+    fn relative_to_works() {
+        assert_eq!(
+            Position::new(0, 0, 0).relative_to(4),
+            Position::new(0, 0, 0)
+        );
+        assert_eq!(
+            Position::new(-3, -2, -1).relative_to(CHUNK_SIZE),
+            Position::new(61, 62, 63)
+        );
+        assert_eq!(
+            Position::new(-3, -2, -1).relative_to(4),
+            Position::new(1, 2, 3)
+        );
+    }
+
+    #[test]
+    fn to_child_index_works() {
+        assert_eq!(Position::new(0, 0, 0).to_child_index(CHUNK_SIZE), 0);
+        assert_eq!(Position::new(0, 0, 0).to_child_index(2), 0);
     }
 }

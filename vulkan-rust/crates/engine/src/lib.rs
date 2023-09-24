@@ -1,72 +1,59 @@
-#![allow(unused)]
 #![feature(test)]
 
 extern crate nalgebra_glm as glm;
 extern crate test;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use gamedata::material::Material;
-use gamestate::GameState;
-use graphics::{
-    camera::{self, Camera, FlyingCamera},
-    Mesh, Vertex,
-};
-use log::*;
-use player::Player;
-use rayon::prelude::*;
+use graphics::{camera::FlyingCamera, Mesh, Ray};
+use render::render_distance::get_chunks_to_render;
+
 use std::{
-    collections::{BTreeMap, HashMap, HashSet, VecDeque},
-    f32::consts::PI,
-    ffi::CStr,
-    fs::File,
-    mem::size_of,
-    os::raw::c_void,
-    ptr::copy_nonoverlapping as memcpy,
+    collections::VecDeque,
     sync::{
         mpsc::{channel, Receiver},
         Arc, Condvar, Mutex,
     },
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
-    usize,
+    time::Instant,
 };
-use vk_util::{app::App, buffer::create_chunk_buffers, constants::LOG_WORLD};
-use vulkanalia::{
-    loader::{LibloadingLoader, LIBRARY},
-    prelude::v1_0::*,
-    vk::ExtDebugUtilsExtension,
-    vk::KhrSurfaceExtension,
-    vk::KhrSwapchainExtension,
-    window as vk_window,
-};
+use vk_util::{app::App, buffer::create_chunk_buffers};
 use winit::{
     dpi::{LogicalSize, PhysicalPosition},
     event::{
         DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent,
     },
     event_loop::{ControlFlow, EventLoop},
-    window::{Window, WindowBuilder},
+    window::WindowBuilder,
 };
 use world::{
-    chunk_generator::ChunkGenerator, chunk_id::ChunkId, mesh_generator::generate_greedy_mesh,
-    ChunkData, World, CHUNK_SIZE, CHUNK_SIZE_SAFE_CUBED,
+    gen::chunk::{compress, Chunk},
+    mesh_generator::generate_greedy_mesh,
+    slice::CubeSlice,
+    traits::{Data3D, Generate, Voxelize},
+    ChunkData, ChunkId, PositionalSeed, Raycast, World, WorldPosition, WorldSeed, CHUNK_SIZE,
+    CHUNK_SIZE_I, CHUNK_SIZE_SAFE, CHUNK_SIZE_SAFE_CUBED,
 };
 
-mod gamestate;
 pub mod models;
-mod player;
 pub mod render;
 pub mod systems;
 
 #[derive(Clone)]
 struct GeneratedChunk(ChunkId, ChunkData, Option<Mesh>);
 
-fn generate_chunk(id: &ChunkId) -> GeneratedChunk {
-    let generator = ChunkGenerator::new();
-    let (data, block_count) = generator.generate(&id);
-    let compact_data = generator.compress(&data);
-    let mesh = if block_count > 0 && block_count < CHUNK_SIZE_SAFE_CUBED {
-        let maybe_mesh = generate_greedy_mesh(&id, &data);
+type ChunkGenerationInput = (WorldSeed, ChunkId);
+
+fn generate_chunk(input: &ChunkGenerationInput) -> GeneratedChunk {
+    let (world_seed, chunk_id) = input;
+    let chunk_seed = PositionalSeed::for_chunk(world_seed, chunk_id);
+    let chunk = Chunk::generate(chunk_seed);
+    let voxel_data = chunk.voxelize();
+    let compact_data = compress(&voxel_data.voxels);
+
+    // TODO: a better check to determine if a mesh. Some edgecases here. Would safe the inner if.
+    let mesh = if voxel_data.voxel_count > 0 && voxel_data.voxel_count < CHUNK_SIZE_SAFE_CUBED {
+        let maybe_mesh = generate_greedy_mesh(chunk_id, &voxel_data.voxels);
         if maybe_mesh.vertices.len() == 0 {
             None
         } else {
@@ -78,7 +65,7 @@ fn generate_chunk(id: &ChunkId) -> GeneratedChunk {
 
     // println!("{LOG_WORLD} Generating chunk");
 
-    GeneratedChunk(id.clone(), compact_data, mesh)
+    GeneratedChunk(chunk_id.clone(), compact_data, mesh)
 }
 
 pub struct WorkingQueue<I, O>
@@ -86,7 +73,6 @@ where
     I: 'static + Clone + Send,
     O: 'static + Clone + Send,
 {
-    name: String,
     _threads: Vec<JoinHandle<()>>,
     sender: Arc<(Mutex<VecDeque<I>>, Condvar)>,
     receiver: Receiver<O>,
@@ -140,7 +126,6 @@ where
         }
 
         Self {
-            name,
             _threads: threads,
             sender: work_queue,
             receiver: result_receiver,
@@ -167,7 +152,7 @@ impl Engine {
 
         // modify camera
         self.camera.cam.position += self.camera.movement.velocity * *delta_time;
-        if (self.camera.input.is_pressed()) {
+        if self.camera.input.is_pressed() {
             let acceleration = self.camera.cam.get_base_change_mat()
                 * self.camera.input.get_as_vec()
                 * self.camera.movement.acceleration_factor
@@ -175,8 +160,8 @@ impl Engine {
 
             self.camera.movement.velocity += acceleration;
 
-            if self.camera.movement.velocity.magnitude() > 20. {
-                self.camera.movement.velocity.set_magnitude(20.)
+            if self.camera.movement.velocity.magnitude() > 10. {
+                self.camera.movement.velocity.set_magnitude(10.)
             }
         } else {
             self.camera.movement.velocity = self
@@ -211,7 +196,7 @@ impl Engine {
         let event_loop = EventLoop::new();
         let window = WindowBuilder::new()
             .with_title("Game")
-            .with_inner_size(LogicalSize::new(1024, 768))
+            .with_inner_size(LogicalSize::new(800, 450))
             .build(&event_loop)?;
 
         let mut app = unsafe { App::create(&window)? };
@@ -229,16 +214,17 @@ impl Engine {
 
         let mut previous_frame_start = Instant::now();
 
-        let mut frame_counter = 0;
+        let mut _frame_counter = 0;
         let start = Instant::now();
         let mut seconds_since_start: u64 = 0;
 
         event_loop.run(move |event, _, control_flow| {
-            *control_flow = ControlFlow::Poll;
+            // *control_flow = ControlFlow::Poll;
+
             match event {
                 Event::MainEventsCleared if !destroying && !minimized => {
                     let current_frame_start = Instant::now();
-                    frame_counter += 1;
+                    _frame_counter += 1;
 
                     let delta_time = &current_frame_start
                         .duration_since(previous_frame_start)
@@ -258,59 +244,96 @@ impl Engine {
                         &current_frame_start.duration_since(start).as_secs();
 
                     if *new_seconds_since_start > seconds_since_start {
-                        println!("FPS: {frame_counter}");
-                        frame_counter = 0;
+                        println!("FPS: {_frame_counter}");
+                        _frame_counter = 0;
                         seconds_since_start = *new_seconds_since_start;
                     }
-
                     unsafe { app.render(&window, &self.world, &self.camera) }.unwrap()
                 }
-                Event::WindowEvent {
-                    event: WindowEvent::Resized(size),
-                    ..
-                } => {
-                    if size.width == 0 || size.height == 0 {
-                        minimized = true;
-                    } else {
-                        minimized = false;
-                        app.resized = true;
+                Event::WindowEvent { event, .. } => match event {
+                    WindowEvent::Resized(size) => {
+                        if size.width == 0 || size.height == 0 {
+                            minimized = true;
+                        } else {
+                            minimized = false;
+                            app.resized = true;
+                        }
                     }
-                }
-                // Destroy our Vulkan app.
-                Event::WindowEvent {
-                    event: WindowEvent::CloseRequested,
-                    ..
-                } => {
-                    destroying = true;
-                    *control_flow = ControlFlow::Exit;
-                    unsafe {
-                        app.destroy();
+                    WindowEvent::CloseRequested => {
+                        destroying = true;
+                        *control_flow = ControlFlow::Exit;
+                        unsafe {
+                            app.destroy();
+                        }
                     }
-                }
-                Event::WindowEvent {
-                    event: WindowEvent::MouseInput { state, button, .. },
-                    ..
-                } => {
-                    if !focused && state == ElementState::Released && button == MouseButton::Left {
-                        focused = true;
-                        grabbed = true;
-                        cursor_visible = false;
-                        window.set_cursor_grab(true).expect("Cursor lock failed");
-                        window.set_cursor_visible(false);
+                    WindowEvent::MouseInput { state, button, .. } => {
+                        if !focused
+                            && state == ElementState::Released
+                            && button == MouseButton::Left
+                        {
+                            focused = true;
+                            grabbed = true;
+                            cursor_visible = false;
+                            window.set_cursor_grab(true).expect("Cursor lock failed");
+                            window.set_cursor_visible(false);
+                        } else if state == ElementState::Released {
+                            let correction = if button == MouseButton::Left {
+                                0.01
+                            } else {
+                                -0.01
+                            };
+                            let direction = self.camera.cam.direction().normalize();
+                            let origin = self.camera.cam.position;
+                            let ray = Ray::new(origin, direction);
+                            let building_range = 0.0..5.0;
+                            if let Some(distance) = self.world.cast_ray(&ray, &building_range) {
+                                let hit = ray.point_on_ray(distance + correction);
+                                let pos = WorldPosition::from(&hit);
+
+                                if button == MouseButton::Left {
+                                    self.world.set_block(&pos, Material::Air);
+                                } else {
+                                    self.world.set_block(&pos, Material::Debug);
+                                }
+
+                                let chunk_id = ChunkId::from(&pos);
+                                self.remesh_chunk(&chunk_id, &mut app);
+                            }
+                        }
                     }
-                }
-                Event::WindowEvent {
-                    event: WindowEvent::Focused(new_focus),
-                    ..
-                } => {
-                    focused = new_focus;
-                    grabbed = new_focus;
-                    cursor_visible = !new_focus;
-                    window
-                        .set_cursor_grab(new_focus)
-                        .expect("Cursor lock failed");
-                    window.set_cursor_visible(!new_focus);
-                }
+                    WindowEvent::Focused(new_focus) => {
+                        focused = new_focus;
+                        grabbed = new_focus;
+                        cursor_visible = !new_focus;
+                        window
+                            .set_cursor_grab(new_focus)
+                            .expect("Cursor lock failed");
+                        window.set_cursor_visible(!new_focus);
+                    }
+                    WindowEvent::KeyboardInput { input, .. } => {
+                        // gain focus & enable FPS controls
+                        match input.virtual_keycode {
+                            Some(VirtualKeyCode::Escape) => {
+                                grabbed = false;
+                                cursor_visible = true;
+                                window.set_cursor_grab(false).expect("Cursor lock failed");
+                                window.set_cursor_visible(true);
+                            }
+                            _ => (),
+                        }
+                    }
+                    WindowEvent::CursorMoved { position, .. } => {
+                        if grabbed && focused && !cursor_visible {
+                            let (x, y) = (center.x - position.x, center.y - position.y);
+                            window
+                                .set_cursor_position(center)
+                                .expect("Cursor position setting failed");
+                            self.camera.cam.add_pitch((y * 0.1) as f32);
+                            self.camera.cam.add_yaw((x * 0.1) as f32);
+                        }
+                    }
+                    _ => {}
+                },
                 Event::DeviceEvent {
                     event:
                         DeviceEvent::Key(KeyboardInput {
@@ -325,7 +348,7 @@ impl Engine {
                     if pressed {
                         match virtual_keycode {
                             Some(VirtualKeyCode::F1) => {
-                                unsafe { app.recreate_swapchain(&window) };
+                                unsafe { app.recreate_swapchain(&window) }.unwrap();
                             }
                             _ => {}
                         }
@@ -335,73 +358,105 @@ impl Engine {
                         self.camera.input.set_key(key, pressed);
                     }
                 }
-                Event::WindowEvent {
-                    event: WindowEvent::KeyboardInput { input, .. },
-                    ..
-                } => {
-                    // gain focus & enable FPS controls
-                    match input.virtual_keycode {
-                        Some(VirtualKeyCode::Escape) => {
-                            grabbed = false;
-                            cursor_visible = true;
-                            window.set_cursor_grab(false).expect("Cursor lock failed");
-                            window.set_cursor_visible(true);
-                        }
-                        _ => (),
-                    }
-                }
-                Event::WindowEvent {
-                    event: WindowEvent::CursorMoved { position, .. },
-                    ..
-                } => {
-                    if grabbed && focused && !cursor_visible {
-                        let (x, y) = (center.x - position.x, center.y - position.y);
-                        window
-                            .set_cursor_position(center)
-                            .expect("Cursor position setting failed");
-                        self.camera.cam.add_pitch((y * 0.1) as f32);
-                        self.camera.cam.add_yaw((x * 0.1) as f32);
-                    }
-                }
                 _ => {}
             }
         });
     }
 
-    fn load_chunks(&mut self, generators: &WorkingQueue<ChunkId, GeneratedChunk>) {
-        // load chunks
-        let player_chunk = ChunkId::new(
-            self.camera.cam.position.x as i32 / CHUNK_SIZE as i32,
-            self.camera.cam.position.y as i32 / CHUNK_SIZE as i32,
-            self.camera.cam.position.z as i32 / CHUNK_SIZE as i32,
-        );
+    fn remesh_chunk(&mut self, chunk_id: &ChunkId, app: &mut App) {
+        if let Some(chunk_data) = self.world.chunk_manager.get_data(&chunk_id) {
+            let mut blocks = CubeSlice::<Material, CHUNK_SIZE_SAFE>::default();
 
-        let render_dist = 2;
-        let mut ids = vec![];
-        for z in -render_dist..=render_dist {
-            for y in -render_dist..=render_dist {
-                for x in -render_dist..=render_dist {
-                    let chunk_id =
-                        ChunkId::new(player_chunk.x + x, player_chunk.y + y, player_chunk.z + z);
-
-                    if !self.world.chunk_manager.ids.contains(&chunk_id)
-                    // && chunk_id == ChunkId::new(0, 0, 0)
-                    {
-                        ids.push(chunk_id);
+            // center chunk
+            for x in 0..CHUNK_SIZE {
+                for y in 0..CHUNK_SIZE {
+                    for z in 0..CHUNK_SIZE {
+                        blocks.set(x + 1, y + 1, z + 1, chunk_data.get(x, y, z));
                     }
                 }
             }
-        }
 
-        ids.sort_by(|a, b| ChunkId::dist2(a, &player_chunk).cmp(&ChunkId::dist2(b, &player_chunk)));
+            let adjecent_chunks = [
+                ChunkId::new(chunk_id.x - 1, chunk_id.y, chunk_id.z),
+                ChunkId::new(chunk_id.x + 1, chunk_id.y, chunk_id.z),
+                ChunkId::new(chunk_id.x, chunk_id.y - 1, chunk_id.z),
+                ChunkId::new(chunk_id.x, chunk_id.y + 1, chunk_id.z),
+                ChunkId::new(chunk_id.x, chunk_id.y, chunk_id.z - 1),
+                ChunkId::new(chunk_id.x, chunk_id.y, chunk_id.z + 1),
+            ];
 
-        {
-            let (lock, condition) = &*generators.sender;
-            if let Ok(ref mut mutex) = lock.try_lock() {
-                self.world.chunk_manager.ids.extend(ids.clone());
-                mutex.extend(ids);
-                condition.notify_all();
+            // x
+            if let Some(adjecent) = self.world.chunk_manager.get_data(&adjecent_chunks[0]) {
+                for y in 0..CHUNK_SIZE {
+                    for z in 0..CHUNK_SIZE {
+                        blocks.set(0, y + 1, z + 1, adjecent.get(CHUNK_SIZE - 1, y, z));
+                    }
+                }
             }
+            if let Some(adjecent) = self.world.chunk_manager.get_data(&adjecent_chunks[1]) {
+                for y in 0..CHUNK_SIZE {
+                    for z in 0..CHUNK_SIZE {
+                        blocks.set(CHUNK_SIZE_SAFE - 1, y + 1, z + 1, adjecent.get(0, y, z));
+                    }
+                }
+            }
+
+            // y
+            if let Some(adjecent) = self.world.chunk_manager.get_data(&adjecent_chunks[2]) {
+                for x in 0..CHUNK_SIZE {
+                    for z in 0..CHUNK_SIZE {
+                        blocks.set(x + 1, 0, z + 1, adjecent.get(x, CHUNK_SIZE - 1, z));
+                    }
+                }
+            }
+            if let Some(adjecent) = self.world.chunk_manager.get_data(&adjecent_chunks[3]) {
+                for x in 0..CHUNK_SIZE {
+                    for z in 0..CHUNK_SIZE {
+                        blocks.set(x + 1, CHUNK_SIZE_SAFE - 1, z + 1, adjecent.get(x, 0, z));
+                    }
+                }
+            }
+
+            // x
+            if let Some(adjecent) = self.world.chunk_manager.get_data(&adjecent_chunks[4]) {
+                for x in 0..CHUNK_SIZE {
+                    for y in 0..CHUNK_SIZE {
+                        blocks.set(x + 1, y + 1, 0, adjecent.get(x, y, CHUNK_SIZE - 1));
+                    }
+                }
+            }
+            if let Some(adjecent) = self.world.chunk_manager.get_data(&adjecent_chunks[5]) {
+                for x in 0..CHUNK_SIZE {
+                    for y in 0..CHUNK_SIZE {
+                        blocks.set(x + 1, y + 1, CHUNK_SIZE_SAFE - 1, adjecent.get(x, y, 0));
+                    }
+                }
+            }
+
+            let mesh = generate_greedy_mesh(&chunk_id, &blocks);
+            if !mesh.indices.is_empty() && !mesh.vertices.is_empty() {
+                add_mesh(app, &chunk_id, mesh, &mut self.world)
+            } else {
+                println!("WARNING: empty mesh after remeshing");
+            }
+        }
+    }
+
+    fn load_chunks(&mut self, generators: &WorkingQueue<ChunkGenerationInput, GeneratedChunk>) {
+        let center = WorldPosition::from(&self.camera.cam.position);
+        let ids = get_chunks_to_render(&center, CHUNK_SIZE_I * 4, &self.world.chunk_manager.ids);
+
+        let input: Vec<ChunkGenerationInput> = ids
+            .iter()
+            // .filter(|id| id.x >= 0 && id.y >= 0 && id.z >= 0)
+            .map(|id| (self.world.seed.clone(), id.clone()))
+            .collect();
+
+        let (lock, condition) = &*generators.sender;
+        if let Ok(ref mut mutex) = lock.try_lock() {
+            self.world.chunk_manager.ids.extend(ids.clone());
+            mutex.extend(input);
+            condition.notify_all();
         }
     }
 }
@@ -415,10 +470,14 @@ fn add_chunk(
 ) {
     world.chunk_manager.insert_data(&id, chunk_data);
     if let Some(mesh) = chunk_mesh {
-        unsafe {
-            create_chunk_buffers(&app.instance, &app.device, &id, &mesh, &mut app.data);
-        };
-
-        world.mesh_manager.insert(&id, mesh);
+        add_mesh(app, id, mesh, world);
     }
+}
+
+fn add_mesh(app: &mut App, id: &ChunkId, mesh: Mesh, world: &mut World) {
+    unsafe {
+        create_chunk_buffers(&app.instance, &app.device, &id, &mesh, &mut app.data).unwrap();
+    };
+
+    world.mesh_manager.insert(&id, mesh);
 }
