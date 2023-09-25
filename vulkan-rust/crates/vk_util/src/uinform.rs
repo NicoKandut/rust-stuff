@@ -8,6 +8,7 @@ use vulkanalia::prelude::v1_0::*;
 pub struct UniformBufferObject {
     pub view: glm::Mat4,
     pub proj: glm::Mat4,
+    pub player: glm::Vec4,
 }
 
 pub unsafe fn create_descriptor_set_layout(device: &Device, data: &mut AppData) -> Result<()> {

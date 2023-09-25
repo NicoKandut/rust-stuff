@@ -6,7 +6,7 @@ extern crate test;
 use anyhow::Result;
 use gamedata::material::Material;
 use graphics::{camera::FlyingCamera, Mesh, Ray};
-use render::render_distance::get_chunks_to_render;
+use render::render_distance::calculate_chunk_diff;
 use threadpool::ThreadPool;
 
 use std::{
@@ -38,13 +38,11 @@ pub mod systems;
 #[derive(Clone)]
 struct GeneratedChunk(ChunkId, ChunkData, Option<Mesh>);
 
-type ChunkGenerationInput = (WorldSeed, ChunkId);
-
-const RENDER_DISTANCE: i32 = CHUNK_SIZE_I * 16;
+const RENDER_DISTANCE: i32 = CHUNK_SIZE_I * 4;
+const UNRENDER_DISTANCE: i32 = CHUNK_SIZE_I * 5;
 const PLAYER_BUILDING_REACH: f32 = 10.0;
 
-fn generate_chunk(input: &ChunkGenerationInput) -> GeneratedChunk {
-    let (world_seed, chunk_id) = input;
+fn generate_chunk(world_seed: &WorldSeed, chunk_id: &ChunkId) -> GeneratedChunk {
     let chunk_seed = PositionalSeed::for_chunk(world_seed, chunk_id);
     let chunk = Chunk::generate(chunk_seed);
     let voxel_data = chunk.voxelize();
@@ -102,7 +100,7 @@ impl Engine {
 
         // world_collision
         if self.camera.movement.velocity.norm() >= 0.01 {
-            let desired_movement_amount = self.camera.movement.velocity.norm() * 10.0 * *delta_time;
+            let desired_movement_amount = self.camera.movement.velocity.norm() * *delta_time;
             let direction = self.camera.movement.velocity.normalize();
             let ray = Ray::new(self.camera.cam.position, direction);
             let movement_range = 0.0..1.0;
@@ -162,7 +160,7 @@ impl Engine {
                         .as_secs_f32();
 
                     self.update_camera(delta_time);
-                    self.load_chunks(&thread_pool, ready_chunks_tx.clone());
+                    self.load_chunks(&thread_pool, ready_chunks_tx.clone(), &mut app);
 
                     if let Ok(generated_chunk) = ready_chunks_rx.try_recv() {
                         let GeneratedChunk(id, chunk_data, chunk_mesh) = generated_chunk;
@@ -376,26 +374,37 @@ impl Engine {
         }
     }
 
-    fn load_chunks(&mut self, thread_pool: &ThreadPool, parking_lot: mpsc::Sender<GeneratedChunk>) {
+    fn load_chunks(
+        &mut self,
+        thread_pool: &ThreadPool,
+        parking_lot: mpsc::Sender<GeneratedChunk>,
+        app: &mut App,
+    ) {
         let center = WorldPosition::from(&self.camera.cam.position);
-        let ids = get_chunks_to_render(&center, RENDER_DISTANCE, self.world.chunk_manager.ids());
+        let chunk_load = calculate_chunk_diff(
+            self.world.chunk_manager.ids(),
+            &center,
+            RENDER_DISTANCE,
+            UNRENDER_DISTANCE,
+        );
 
-        for id in ids.iter() {
+        for id in chunk_load.add.iter() {
             self.world.chunk_manager.set_requested(id);
         }
 
-        let input: Vec<ChunkGenerationInput> = ids
-            .iter()
-            .filter(|id| id.x >= 0 && id.y >= 0 && id.z >= 0 && id.z < 8)
-            .map(|id| (self.world.seed.clone(), id.clone()))
-            .collect();
-
-        for entry in input {
+        for chunk_id in chunk_load.add {
             let tx = parking_lot.clone();
+            let seed = self.world.seed.clone();
             thread_pool.execute(move || {
-                let chunk = generate_chunk(&entry);
+                let chunk = generate_chunk(&seed, &chunk_id);
                 tx.send(chunk).unwrap();
             });
+        }
+
+        for chunk_id in chunk_load.remove {
+            unsafe { app.unload_single_chunk(&chunk_id) }
+            self.world.mesh_manager.remove(&chunk_id);
+            self.world.chunk_manager.remove(&chunk_id);
         }
     }
 }

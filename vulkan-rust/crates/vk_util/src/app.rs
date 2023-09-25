@@ -16,7 +16,7 @@ use crate::{
     swapchain::{create_swapchain, create_swapchain_image_views},
     uinform::{create_descriptor_set_layout, create_uniform_buffers, UniformBufferObject},
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use graphics::{camera::FlyingCamera, Frustum};
 use std::{mem::size_of, ptr::copy_nonoverlapping as memcpy, time::Instant};
 use vulkanalia::{
@@ -124,7 +124,7 @@ impl App {
         let vp = self.calculate_vp(cam);
 
         self.update_command_buffer(image_index, world, &vp)?;
-        self.update_uniform_buffer(image_index, vp)?;
+        self.update_uniform_buffer(image_index, vp, glm::vec3_to_vec4(&cam.cam.position))?;
 
         let wait_semaphores = &[self.data.image_available_semaphores[self.frame]];
         let wait_stages = &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
@@ -221,12 +221,19 @@ impl App {
             .iter()
             .filter_map(|(id, mesh)| {
                 if frustum.intersects_aabb(&id.into()) {
-                    Some(self.update_secondary_command_buffer(image_index, id, mesh.indices.len()))
+                    match self.update_secondary_command_buffer(image_index, id, mesh.indices.len())
+                    {
+                        Ok(cmd_buffer) => Some(cmd_buffer),
+                        Err(_) => {
+                            println!("Failed to update cmd buffer");
+                            None
+                        }
+                    }
                 } else {
                     None
                 }
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Vec<_>>();
 
         // println!(
         //     "World has {} chunks. Rendering {} of them.",
@@ -268,8 +275,14 @@ impl App {
             command_buffers.insert(id.clone(), command_buffer);
         }
 
-        let command_buffer = command_buffers[id];
-        let vertex_buffer = self.data.chunk_vertex_buffers[id];
+        let command_buffer = *command_buffers
+            .get(id)
+            .context("Cannot use command buffer")?;
+        let vertex_buffer = *self
+            .data
+            .chunk_vertex_buffers
+            .get(id)
+            .context("Cannot use vertex buffer")?;
 
         let start = WorldPosition::from(id);
         let x = start.x as f32;
@@ -279,8 +292,8 @@ impl App {
         let model = glm::translate(&glm::identity(), &glm::vec3(x, y, z));
         let (_, model_bytes, _) = model.as_slice().align_to::<u8>();
 
-        let time = self.start.elapsed().as_secs_f32();
-        let light = glm::vec4(time.sin(), time.cos(), 2.0, 0.0).normalize();
+        let time = self.start.elapsed().as_secs_f32() / 20.0;
+        let light = glm::vec4(time.sin(), time.cos(), -2.0, 0.0).normalize();
         let (_, light_bytes, _) = light.as_slice().align_to::<u8>();
 
         let inheritance_info = vk::CommandBufferInheritanceInfo::builder()
@@ -341,9 +354,10 @@ impl App {
         &self,
         image_index: usize,
         vp: (glm::Mat4, glm::Mat4),
+        player: glm::Vec4,
     ) -> Result<()> {
         let (view, proj) = vp;
-        let ubo = UniformBufferObject { view, proj };
+        let ubo = UniformBufferObject { view, proj, player };
         let memory = self.device.map_memory(
             self.data.uniform_buffers_memory[image_index],
             0,
@@ -459,6 +473,23 @@ impl App {
         }
         for (_, memory) in &self.data.chunk_vertex_buffers_memory {
             self.device.free_memory(*memory, None);
+        }
+    }
+
+    pub unsafe fn unload_single_chunk(&mut self, id: &ChunkId) {
+        self.device.device_wait_idle().unwrap();
+        if let Some(buffer) = self.data.chunk_index_buffer.remove(id) {
+            self.device.destroy_buffer(buffer, None);
+        }
+        if let Some(memory) = self.data.chunk_index_buffer_memory.remove(id) {
+            self.device.free_memory(memory, None);
+        }
+
+        if let Some(buffer) = self.data.chunk_vertex_buffers.remove(id) {
+            self.device.destroy_buffer(buffer, None);
+        }
+        if let Some(memory) = self.data.chunk_vertex_buffers_memory.remove(id) {
+            self.device.free_memory(memory, None);
         }
     }
 

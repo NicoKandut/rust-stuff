@@ -2,8 +2,6 @@ use std::collections::{BTreeSet, HashMap};
 
 use world::{ChunkId, WorldPosition, CHUNK_SIZE_I};
 
-const HALF_CHUNK: i32 = CHUNK_SIZE_I / 2;
-
 pub fn get_chunks_to_render(
     center: &WorldPosition,
     render_distance: i32,
@@ -35,8 +33,7 @@ pub fn get_chunks_to_render(
                     continue;
                 }
 
-                let position = &WorldPosition::from(&candidate) + HALF_CHUNK;
-                let distance = WorldPosition::distance_squared(center, &position);
+                let distance = WorldPosition::distance_squared(center, &candidate.center());
                 if distance <= render_distance_squared {
                     distances.insert(candidate, distance);
                 }
@@ -49,6 +46,38 @@ pub fn get_chunks_to_render(
     result.sort_by(|a, b| distances[a].cmp(&distances[b]));
 
     result
+}
+
+#[derive(Debug)]
+pub(crate) struct ChunkLoadingAction {
+    pub(crate) add: Vec<ChunkId>,
+    pub(crate) remove: Vec<ChunkId>,
+}
+
+pub(crate) fn calculate_chunk_diff(
+    loaded_chunks: &BTreeSet<ChunkId>,
+    center: &WorldPosition,
+    render_distance: i32,
+    unrender_distance: i32,
+) -> ChunkLoadingAction {
+    let remove = loaded_chunks
+        .iter()
+        .filter(|chunk| {
+            WorldPosition::distance_squared(center, &chunk.center()) > unrender_distance.pow(2)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let add = get_chunks_to_render(center, render_distance, loaded_chunks);
+
+    if !add.is_empty() || !remove.is_empty() {
+        println!(
+            "Loading chunks:\n   adding{:?}, removing: {:?}",
+            add.len(),
+            remove.len()
+        )
+    }
+
+    ChunkLoadingAction { add, remove }
 }
 
 #[cfg(test)]

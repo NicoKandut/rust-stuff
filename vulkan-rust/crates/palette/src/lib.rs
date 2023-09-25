@@ -18,7 +18,7 @@ color!(red, 255, 0, 0, 255);
 color!(white, 255, 255, 255, 255);
 color!(transparent, 0, 0, 0, 0);
 
-color!(water, 10, 98, 225, 255);
+color!(water, 10, 98, 225, 128);
 color!(stone, 91, 93, 108, 255);
 color!(grass, 130, 186, 23, 255);
 color!(sand, 195, 194, 155, 255);

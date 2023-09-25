@@ -27,6 +27,10 @@ impl ChunkManager {
         self.ids.insert(id.clone());
     }
 
+    pub fn remove(&mut self, id: &ChunkId) {
+        self.ids.remove(id);
+    }
+
     pub fn get_data(&self, id: &ChunkId) -> Option<&ChunkData> {
         match self.chunks.get(id) {
             Some(chunk_box) => Some(chunk_box),

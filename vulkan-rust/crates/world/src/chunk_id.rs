@@ -1,4 +1,4 @@
-use crate::{WorldPosition, CHUNK_SIZE_I};
+use crate::{WorldPosition, CHUNK_SIZE_I, HALF_CHUNK_I};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ChunkId {
@@ -16,6 +16,10 @@ impl ChunkId {
         let diff = [lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z];
 
         diff[0].pow(2) + diff[1].pow(2) + diff[2].pow(2)
+    }
+
+    pub fn center(&self) -> WorldPosition {
+        &WorldPosition::from(self) + HALF_CHUNK_I
     }
 }
 

@@ -3,6 +3,7 @@
 layout(binding = 0) uniform UniformBufferObject {
     mat4 view;
     mat4 proj;
+    vec4 player;
 } ubo;
 
 layout(push_constant) uniform PushConstants {
@@ -21,7 +22,7 @@ void main() {
     vec4 world_pos = pcs.model * vec4(inPosition, 1.0);
     gl_Position = ubo.proj * ubo.view * pcs.model * vec4(inPosition, 1.0);
 
-    fragDistance = length(world_pos.xyz);
+    fragDistance = length(world_pos.xyz - ubo.player.xyz);
     fragColor = inColor;
     fragNormal = inNormal;
 }

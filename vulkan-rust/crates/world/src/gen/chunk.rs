@@ -58,12 +58,12 @@ impl Voxelize<ChunkVoxels> for Chunk {
             &mut voxel_count,
         );
         generate_water(self.seed.pos(), &mut voxels, &mut voxel_count);
-        generate_caves(
-            self.seed.world_seed(),
-            &chunk_start,
-            &mut voxels,
-            &mut voxel_count,
-        );
+        // generate_caves(
+        //     self.seed.world_seed(),
+        //     &chunk_start,
+        //     &mut voxels,
+        //     &mut voxel_count,
+        // );
         generate_surface(&mut voxels, &self.temperature);
         generate_trees(&chunk_start, &mut voxels);
         generate_boulders(&chunk_start, &mut voxels);
