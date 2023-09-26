@@ -89,8 +89,8 @@ impl FlyingCamera {
             },
             movement: Movement {
                 velocity: glm::Vec3::default(),
-                max_velocity: 100.,
-                acceleration_factor: 10.,
+                max_velocity: 10.,
+                acceleration_factor: 3.,
             },
             input: FlyingMovementInput::new(),
         }

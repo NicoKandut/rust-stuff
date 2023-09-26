@@ -1,9 +1,7 @@
-/**
- * Axis Aligned Bounding Box
- */
+/// Axis Aligned Bounding Box
 pub struct AABB {
-    pub min: glm::Vec3,
-    pub max: glm::Vec3,
+    min: glm::Vec3,
+    max: glm::Vec3,
 }
 
 impl AABB {
@@ -23,5 +21,9 @@ impl AABB {
         let max = glm::Vec3::new(size, size, size);
 
         Self { min, max }
+    }
+
+    pub fn bounds(&self) -> (&glm::Vec3, &glm::Vec3) {
+        (&self.min, &self.max)
     }
 }

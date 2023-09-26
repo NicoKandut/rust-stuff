@@ -1,6 +1,5 @@
 use crate::{
     appdata::AppData,
-    constants::LOG_VK,
     device::memory::get_memory_type_index,
     image::{begin_single_time_commands, end_single_time_commands},
 };
@@ -110,10 +109,6 @@ pub unsafe fn create_chunk_vertex_buffer(
     if let Some(m) = prev_memory {
         // TODO: is freeing correct?
         device.free_memory(m, None);
-    }
-
-    if prev_buffer.is_some() || prev_memory.is_some() {
-        println!("{LOG_VK} Freeing chunk vertex buffer/memory ({:?})", id);
     }
 
     copy_buffer(device, data, staging_buffer, vertex_buffer, size)?;
@@ -264,10 +259,6 @@ pub unsafe fn create_chunk_index_buffer(
     if let Some(m) = prev_memory {
         // TODO: is freeing correct?
         device.free_memory(m, None);
-    }
-
-    if prev_buffer.is_some() || prev_memory.is_some() {
-        println!("{LOG_VK} Freeing chunk index buffer/memory ({:?})", id);
     }
 
     copy_buffer(device, data, staging_buffer, index_buffer, size)?;

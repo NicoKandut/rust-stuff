@@ -10,7 +10,9 @@ nalgebra-glm = "0.10"
 rand = "0.8.5"
 fastrand = "2.0.0"
 simdnoise = "3.1.6"
-gamedata = {path = "../gamedata"}
-graphics = {path = "../graphics"}
-octree = {path = "../octree"}
+gamedata.workspace = true
+graphics.workspace = true
+octree.workspace = true
+resources.workspace = true
+geometry.workspace = true
 bitvec = "1.0.1"

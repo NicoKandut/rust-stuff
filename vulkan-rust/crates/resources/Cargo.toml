@@ -1,0 +1,9 @@
+[package]
+name = "resources"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+png = "0.16"
+vox-format = "0.1.0"
+lazy_static = "1"

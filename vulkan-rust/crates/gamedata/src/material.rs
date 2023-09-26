@@ -1,3 +1,5 @@
+use std::mem::variant_count;
+
 const SOLID: u8 = 0b1000_0000;
 const OPAQUE: u8 = 0b0100_0000;
 
@@ -42,7 +44,8 @@ impl Material {
 
     pub fn color(&self) -> glm::Vec4 {
         match *self {
-            Self::Air | Self::Unset => palette::transparent(),
+            Self::Air => palette::transparent(),
+            Self::Unset => palette::transparent(),
             Self::Water => palette::water(),
             Self::Glass => palette::transparent(),
             Self::Stone => palette::stone(),
@@ -55,5 +58,58 @@ impl Material {
             Self::Dirt => palette::dirt(),
             Self::Debug => palette::red(),
         }
+    }
+
+    pub fn color_bytes(&self) -> [u8; 4] {
+        match *self {
+            Self::Air => palette::TRANSPARENT,
+            Self::Unset => palette::TRANSPARENT,
+            Self::Water => palette::WATER,
+            Self::Glass => palette::TRANSPARENT,
+            Self::Stone => palette::STONE,
+            Self::Grass => palette::GRASS,
+            Self::Sand => palette::SAND,
+            Self::Snow => palette::WHITE,
+            Self::Ice => palette::WHITE,
+            Self::Wood => palette::WOOD,
+            Self::Leaves => palette::LEAVES,
+            Self::Dirt => palette::DIRT,
+            Self::Debug => palette::RED,
+        }
+    }
+
+    pub const ALL: [Material; variant_count::<Material>()] = [
+        Self::Air,
+        Self::Unset,
+        Self::Water,
+        Self::Glass,
+        Self::Stone,
+        Self::Grass,
+        Self::Sand,
+        Self::Snow,
+        Self::Ice,
+        Self::Wood,
+        Self::Leaves,
+        Self::Dirt,
+        Self::Debug,
+    ];
+
+    pub fn index(&self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|material| self == material)
+            .unwrap()
+    }
+}
+
+impl From<u8> for Material {
+    fn from(value: u8) -> Self {
+        Self::ALL[value as usize]
+    }
+}
+
+impl From<Material> for u8 {
+    fn from(value: Material) -> Self {
+        value as u8
     }
 }

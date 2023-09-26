@@ -17,5 +17,5 @@ thiserror = "1"
 tobj = "2"
 vulkanalia = { version = "=0.14.0", features = ["libloading", "window"] }
 winit = "0.24"
-engine = { path = "../engine", version = "0.0.0" }
-gamedata = { path = "../gamedata", version = "0.0.0" }
+engine.workspace = true
+gamedata.workspace = true

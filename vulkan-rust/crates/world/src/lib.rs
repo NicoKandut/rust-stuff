@@ -5,16 +5,14 @@ extern crate test;
 
 pub mod gen;
 pub mod mesh_generator; // TODO: extract
-pub mod mesh_manager;
+pub mod mesh_manager; // TODO: extract
 pub mod mgmt;
 pub mod slice;
-pub mod traits; // TODO: extract
+pub mod traits;
 
 pub use chunk_id::ChunkId;
-use glm::Vec3;
-use rand::{thread_rng, Rng};
+pub use mgmt::chunk::ChunkManager;
 pub use seed::{PositionalSeed, WorldSeed};
-use traits::Data3D;
 pub use world_parameters::*;
 pub use world_position::WorldPosition;
 
@@ -25,11 +23,23 @@ mod world_parameters;
 mod world_position;
 
 use gamedata::material::Material;
-use graphics::{Ray, AABB};
+use geometry::{Ray, AABB};
+use glm::Vec3;
 use mesh_manager::MeshManager;
-use mgmt::chunk::ChunkManager;
 use octree::{L1Node, L2Node, L3Node, L4Node, L5Node, L6Node, LeafAccess};
-use std::{collections::BTreeSet, ops::Range};
+use rand::{thread_rng, Rng};
+use std::{ops::Range, sync::Arc};
+use traits::Data3D;
+
+pub struct ChunkIdAndData {
+    pub id: ChunkId,
+    pub data: Option<Arc<ChunkData>>,
+}
+
+pub struct ChunkUpdateData {
+    pub chunk: ChunkIdAndData,
+    pub adjecent: [ChunkIdAndData; 6],
+}
 
 impl From<&ChunkId> for AABB {
     fn from(id: &ChunkId) -> Self {
@@ -73,14 +83,6 @@ impl World {
         }
     }
 
-    pub fn ids(&self) -> &BTreeSet<ChunkId> {
-        self.chunk_manager.ids()
-    }
-
-    pub fn get_chunks(&self) -> Vec<(&ChunkId, &Box<ChunkData>)> {
-        self.chunk_manager.get_all()
-    }
-
     pub fn intersects_point(&self, p: [f32; 3]) -> bool {
         let id = ChunkId::new(
             p[0] as i32 / CHUNK_SIZE as i32,
@@ -104,19 +106,6 @@ impl World {
                 .is_solid()
         } else {
             false
-        }
-    }
-
-    pub fn set_block(&mut self, pos: &WorldPosition, material: Material) {
-        let chunk_id = ChunkId::from(pos);
-        let pos_in_chunk = pos.rem_euclid(CHUNK_SIZE_I);
-        if let Some(chunk_data) = self.chunk_manager.get_mut(&chunk_id) {
-            chunk_data.set(
-                pos_in_chunk.x as usize,
-                pos_in_chunk.y as usize,
-                pos_in_chunk.z as usize,
-                material,
-            );
         }
     }
 
@@ -420,7 +409,7 @@ mod tests {
     use std::ops::Range;
 
     use gamedata::material::Material;
-    use graphics::Ray;
+    use geometry::Ray;
     use nalgebra_glm::Vec3;
     use octree::{L1Node, L2Node, L3Node, L4Node, L5Node, L6Node};
 

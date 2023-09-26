@@ -1,14 +1,14 @@
+use super::boulder::Boulder;
 use crate::seed::PositionalSeed;
 use crate::slice::CubeSlice;
 use crate::traits::{Data3D, Generate, Voxelize};
 use crate::{
-    gen::tree::Tree, terrain_noise, world_parameters::SEA_LEVEL, world_position::WorldPosition,
-    ChunkData, CHUNK_SIZE, CHUNK_SIZE_SAFE_SQUARED,
+    terrain_noise, world_parameters::SEA_LEVEL, world_position::WorldPosition, ChunkData,
+    CHUNK_SIZE, CHUNK_SIZE_SAFE_SQUARED,
 };
 use crate::{WorldSeed, CHUNK_SIZE_SAFE};
 use gamedata::material::Material;
-
-use super::boulder::Boulder;
+use resources::prelude::CACHE;
 
 const CAVE_THRESHOLD: f32 = 0.002;
 
@@ -124,6 +124,8 @@ pub fn compress(data: &CubeSlice<Material, CHUNK_SIZE_SAFE>) -> ChunkData {
     result
 }
 
+const TREE_PATH: &str = "D:/Projects/rust-stuff/vulkan-rust/assets/tree.vox";
+
 fn generate_trees(offset: &WorldPosition, data: &mut CubeSlice<Material, CHUNK_SIZE_SAFE>) {
     if offset.z < 0 {
         return;
@@ -150,10 +152,27 @@ fn generate_trees(offset: &WorldPosition, data: &mut CubeSlice<Material, CHUNK_S
 
                 let cur_material = data.get(x, y, z);
                 if !cur_material.is_solid() && prev_material.is_solid() {
-                    let tree = Tree::generate(z as u64);
-                    let tree_voxels = tree.voxelize();
-                    let r = tree.radius as isize;
-                    tree_voxels.write_into(data, x as isize - r, y as isize - r, z as isize - r);
+                    // let tree = Tree::generate(z as u64);
+                    // let tree_voxels = tree.voxelize();
+                    let r = 2;
+                    // tree_voxels.write_into(data, x as isize - r, y as isize - r, z as isize - r);
+
+                    let vox = CACHE.get_vox(TREE_PATH);
+
+                    for voxel in rng.choice(vox.models.iter()).unwrap().voxels.iter() {
+                        let material = Material::from(voxel.color_index.0 - 1);
+
+                        let voxel_x = voxel.point.x as isize - r + x as isize;
+                        let voxel_y = voxel.point.y as isize - r + y as isize;
+                        let voxel_z = voxel.point.z as isize - r + z as isize + 1;
+
+                        data.set(
+                            voxel_x as usize,
+                            voxel_y as usize,
+                            voxel_z as usize,
+                            material,
+                        );
+                    }
                 }
 
                 prev_material = cur_material;

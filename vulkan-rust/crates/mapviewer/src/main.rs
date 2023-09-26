@@ -1,141 +1,255 @@
-use world::{gen::chunk::Chunk, ChunkId};
+// #![feature(variant_count)]
 
-const MATERIAL_COLORS: [[u8; 3]; 10] = [
-    [0, 0, 255],
-    [10, 10, 255],
-    [0, 255, 0],
-    [0, 150, 0],
-    [50, 100, 10],
-    [255, 200, 100],
-    [128, 255, 0],
-    [255, 255, 255],
-    [128, 255, 200],
-    [0, 128, 64],
-];
+use png::{BitDepth::Eight, ColorType::RGBA};
+use rand::{thread_rng, Rng};
+use std::{fs::File, io};
 
-#[repr(u8)]
-enum Biome {
-    Ocean,
-    FrozenOcean,
-    Grassland,
-    Forest,
-    Jungle,
-    Desert,
-    Shrubland,
-    Snowfield,
-    Tundra,
-    Taiga,
+const CLOSED: [u8; SAMPLES] = [255, 0, 0, 255];
+const OPEN: [u8; SAMPLES] = [0, 255, 0, 255];
+
+const TILE_SIZE: usize = 8;
+const TILE_SIZE_WITH_BORDER: usize = TILE_SIZE + 2;
+
+const SAMPLES: usize = 4;
+
+#[derive(Clone, Copy)]
+struct Tile {
+    pixels: [u8; TILE_SIZE * TILE_SIZE * 4],
+    open: [bool; 4],
 }
 
-enum Land {
-    Land,
-    Ocean,
+#[inline]
+const fn index(x: usize, y: usize, w: usize, s: usize) -> usize {
+    s * (y * w + x)
 }
 
-enum Temp {
-    Hot,
-    Regular,
-    Cold,
+fn read_tileset(path: &str) -> Result<Vec<Tile>, io::Error> {
+    let (info, pixels) = resources::read_image(path)?;
+
+    let px_size = info.color_type.samples() * info.bit_depth as usize / 8;
+
+    let width = info.width as usize;
+    let nr_rows = info.height as usize / TILE_SIZE_WITH_BORDER;
+    let nr_cols = info.width as usize / TILE_SIZE_WITH_BORDER;
+
+    let mut tileset = Vec::with_capacity(16);
+
+    for tile_y in 0..nr_rows {
+        for tile_x in 0..nr_cols {
+            let mut tile_pixels = [0_u8; TILE_SIZE * TILE_SIZE * 4];
+
+            for row in 0..TILE_SIZE {
+                let src_start = index(
+                    tile_x * TILE_SIZE_WITH_BORDER + 1,
+                    tile_y * TILE_SIZE_WITH_BORDER + 1 + row,
+                    width,
+                    px_size,
+                );
+                let src_end = index(
+                    tile_x * TILE_SIZE_WITH_BORDER + 1 + TILE_SIZE,
+                    tile_y * TILE_SIZE_WITH_BORDER + 1 + row,
+                    width,
+                    px_size,
+                );
+                let dst_start = index(0, row, TILE_SIZE, px_size);
+                let dst_end = index(TILE_SIZE, row, TILE_SIZE, px_size);
+                tile_pixels[dst_start..dst_end].copy_from_slice(&pixels[src_start..src_end]);
+            }
+
+            let indices = [
+                index(
+                    tile_x * TILE_SIZE_WITH_BORDER + 1,
+                    tile_y * TILE_SIZE_WITH_BORDER,
+                    width,
+                    px_size,
+                ),
+                index(
+                    tile_x * TILE_SIZE_WITH_BORDER + 1 + TILE_SIZE,
+                    tile_y * TILE_SIZE_WITH_BORDER + 1,
+                    width,
+                    px_size,
+                ),
+                index(
+                    tile_x * TILE_SIZE_WITH_BORDER + 1,
+                    tile_y * TILE_SIZE_WITH_BORDER + 1 + TILE_SIZE,
+                    width,
+                    px_size,
+                ),
+                index(
+                    tile_x * TILE_SIZE_WITH_BORDER,
+                    tile_y * TILE_SIZE_WITH_BORDER + 1,
+                    width,
+                    px_size,
+                ),
+            ];
+
+            let open = [
+                OPEN == pixels[indices[0]..(indices[0] + px_size)],
+                OPEN == pixels[indices[1]..(indices[1] + px_size)],
+                OPEN == pixels[indices[2]..(indices[2] + px_size)],
+                OPEN == pixels[indices[3]..(indices[3] + px_size)],
+            ];
+
+            tileset.push(Tile {
+                pixels: tile_pixels,
+                open,
+            });
+        }
+    }
+
+    Ok(tileset)
 }
 
-enum Rainfall {
-    Heavy,
-    Regular,
-    Sparse,
+fn save_tileset(tileset: &[Tile], path: &str) -> Result<(), io::Error> {
+    let px_size = RGBA.samples() * Eight as usize / 8;
+
+    let mut pixels =
+        vec![255_u8; TILE_SIZE_WITH_BORDER * TILE_SIZE_WITH_BORDER * tileset.len() * px_size];
+
+    let mut tile_y = 0;
+    for tile in tileset {
+        let start = index(
+            1,
+            tile_y * TILE_SIZE_WITH_BORDER,
+            TILE_SIZE_WITH_BORDER,
+            px_size,
+        );
+        let end = index(
+            1 + TILE_SIZE,
+            tile_y * TILE_SIZE_WITH_BORDER,
+            TILE_SIZE_WITH_BORDER,
+            px_size,
+        );
+        let color = if tile.open[0] { OPEN } else { CLOSED };
+        pixels[start..end].copy_from_slice(&color.repeat(TILE_SIZE));
+
+        let left_color = if tile.open[3] { OPEN } else { CLOSED };
+        let right_color = if tile.open[1] { OPEN } else { CLOSED };
+        for row in 0..TILE_SIZE {
+            let src_start = index(0, row, TILE_SIZE, px_size);
+            let src_end = index(TILE_SIZE, row, TILE_SIZE, px_size);
+            let dst_start = index(
+                1,
+                tile_y * TILE_SIZE_WITH_BORDER + 1 + row,
+                TILE_SIZE_WITH_BORDER,
+                px_size,
+            );
+            let dst_end = index(
+                1 + TILE_SIZE,
+                tile_y * TILE_SIZE_WITH_BORDER + 1 + row,
+                TILE_SIZE_WITH_BORDER,
+                px_size,
+            );
+            pixels[(dst_start - SAMPLES)..dst_start].copy_from_slice(&left_color);
+            pixels[dst_start..dst_end].copy_from_slice(&tile.pixels[src_start..src_end]);
+            pixels[dst_end..(dst_end + SAMPLES)].copy_from_slice(&right_color);
+        }
+
+        let start = index(
+            1,
+            tile_y * TILE_SIZE_WITH_BORDER + TILE_SIZE + 1,
+            TILE_SIZE_WITH_BORDER,
+            px_size,
+        );
+        let end = index(
+            1 + TILE_SIZE,
+            tile_y * TILE_SIZE_WITH_BORDER + TILE_SIZE + 1,
+            TILE_SIZE_WITH_BORDER,
+            px_size,
+        );
+        let color = if tile.open[2] { OPEN } else { CLOSED };
+        pixels[start..end].copy_from_slice(&color.repeat(TILE_SIZE));
+
+        tile_y += 1;
+    }
+
+    resources::write_image(
+        path,
+        &pixels,
+        TILE_SIZE_WITH_BORDER,
+        tileset.len() * TILE_SIZE_WITH_BORDER,
+    )?;
+
+    Ok(())
+}
+
+fn generate_map(tileset: &[Tile], width: usize, height: usize) -> Vec<Tile> {
+    let mut map: Vec<Tile> = Vec::with_capacity(width * height);
+
+    for y in 0..height {
+        for x in 0..width {
+            let matches = tileset
+                .iter()
+                .filter(|tile| {
+                    if y > 0 {
+                        tile.open[0] == map[(y - 1) * width + x].open[2]
+                    } else {
+                        true
+                    }
+                })
+                .filter(|tile| {
+                    if x > 0 {
+                        tile.open[3] == map[y * width + (x - 1)].open[1]
+                    } else {
+                        true
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let tile = matches[thread_rng().gen_range(0..matches.len())].clone();
+            map.push(tile);
+        }
+    }
+
+    map
 }
 
 pub fn main() {
-    println!("Starting generation");
+    println!("Reading tileset");
+    let tileset = read_tileset("assets/tileset.png").unwrap();
 
-    let mut bytes: Vec<u8> = Vec::new();
+    println!("Saving copy");
+    save_tileset(&tileset, "assets/tileset_copy.png").unwrap();
 
-    let size: i32 = 512;
-    let chunk_size = 1;
-    for chunk_y in 0..size {
-        let mut chunk_bytes: Vec<Vec<u8>> = Vec::new();
+    println!("Generating map");
+    let map = generate_map(&tileset, 10, 10);
 
-        for chunk_x in 0..size {
-            chunk_bytes.push(Vec::new());
+    println!("Saving output");
+    save_map(map, "assets/map.png", 10, 10).unwrap();
 
-            let id = ChunkId::new(chunk_x, chunk_y, 0);
-            let mut generator = ChunkGenerator::new();
-            generator.generate_inplace(&id);
+    println!("Done");
+}
 
-            for _chunk_y in 0..chunk_size {
-                for _chunk_x in 0..chunk_size {
-                    let land = if generator.wip_chunk_continentalness[1][1] > 0.0 {
-                        Land::Land
-                    } else {
-                        Land::Ocean
-                    };
-                    let temp = match generator.wip_chunk_temperature[1][1] {
-                        x if x > 0.01 => Temp::Hot,
-                        x if x > -0.01 => Temp::Regular,
-                        _ => Temp::Cold,
-                    };
+fn save_map(map: Vec<Tile>, path: &str, width: usize, height: usize) -> Result<(), io::Error> {
+    let px_size = RGBA.samples() * Eight as usize / 8;
+    let mut pixels = vec![255_u8; width * TILE_SIZE * height * TILE_SIZE * px_size];
 
-                    let rain = match generator.wip_chunk_rainfall[1][1] {
-                        x if x > 0.01 => Rainfall::Heavy,
-                        x if x > -0.01 => Rainfall::Regular,
-                        _ => Rainfall::Sparse,
-                    };
+    for tile_y in 0..height {
+        for tile_x in 0..width {
+            let tile = map[tile_y * width + tile_x];
 
-                    let biome: Biome = match (land, temp, rain) {
-                        (Land::Land, Temp::Hot, Rainfall::Sparse) => Biome::Desert,
-                        (Land::Land, Temp::Hot, Rainfall::Regular) => Biome::Shrubland,
-                        (Land::Land, Temp::Hot, Rainfall::Heavy) => Biome::Jungle,
-                        (Land::Land, Temp::Regular, Rainfall::Sparse) => Biome::Grassland,
-                        (Land::Land, Temp::Regular, Rainfall::Regular) => Biome::Forest,
-                        (Land::Land, Temp::Regular, Rainfall::Heavy) => Biome::Forest,
-                        (Land::Land, Temp::Cold, Rainfall::Sparse) => Biome::Taiga,
-                        (Land::Land, Temp::Cold, Rainfall::Regular) => Biome::Tundra,
-                        (Land::Land, Temp::Cold, Rainfall::Heavy) => Biome::Snowfield,
-                        (Land::Ocean, Temp::Cold, _) => Biome::FrozenOcean,
-                        (Land::Ocean, _, _) => Biome::Ocean,
-                    };
+            for row in 0..TILE_SIZE {
+                let src_start = index(0, row, TILE_SIZE, px_size);
+                let src_end = index(TILE_SIZE, row, TILE_SIZE, px_size);
+                let dst_start = index(
+                    tile_x * TILE_SIZE,
+                    tile_y * TILE_SIZE + row,
+                    width * TILE_SIZE,
+                    px_size,
+                );
+                let dst_end = index(
+                    tile_x * TILE_SIZE + TILE_SIZE,
+                    tile_y * TILE_SIZE + row,
+                    width * TILE_SIZE,
+                    px_size,
+                );
 
-                    let mat = match biome {
-                        Biome::Ocean => 0,
-                        Biome::FrozenOcean => 1,
-                        Biome::Grassland => 2,
-                        Biome::Forest => 3,
-                        Biome::Jungle => 4,
-                        Biome::Desert => 5,
-                        Biome::Shrubland => 6,
-                        Biome::Snowfield => 7,
-                        Biome::Tundra => 8,
-                        Biome::Taiga => 9,
-                    };
-
-                    chunk_bytes[chunk_x as usize].extend(MATERIAL_COLORS[mat]);
-                }
-            }
-
-            // println!("Chunk done");
-        }
-
-        for y in 0..chunk_size {
-            for chunk_x in 0..size {
-                let from = y * chunk_size * 3;
-                let to = from + chunk_size * 3;
-                let new_bytes = &chunk_bytes[chunk_x as usize][from..to];
-                bytes.extend_from_slice(new_bytes);
+                pixels[dst_start..dst_end].copy_from_slice(&tile.pixels[src_start..src_end]);
             }
         }
     }
 
-    println!("Saving");
+    resources::write_image(path, &pixels, width * TILE_SIZE, height * TILE_SIZE)?;
 
-    let image_size = (size as usize * chunk_size) as u32;
-    image::save_buffer_with_format(
-        "./map.png",
-        &bytes,
-        image_size,
-        image_size,
-        image::ColorType::Rgb8,
-        image::ImageFormat::Png,
-    )
-    .expect("Saving image failed");
-
-    println!("Done");
+    Ok(())
 }

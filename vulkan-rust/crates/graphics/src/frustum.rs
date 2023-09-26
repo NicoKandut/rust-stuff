@@ -1,4 +1,4 @@
-use crate::aabb::AABB;
+use geometry::AABB;
 
 pub struct Frustum {
     planes: [glm::Vec4; 4],
@@ -25,7 +25,7 @@ impl Frustum {
     }
 
     pub fn intersects_aabb(&self, aabb: &AABB) -> bool {
-        let AABB { min, max } = aabb;
+        let (min, max) = aabb.bounds();
 
         // check box outside/inside of frustum
         for plane in &self.planes {

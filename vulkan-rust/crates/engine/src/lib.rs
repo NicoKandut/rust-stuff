@@ -4,9 +4,10 @@ extern crate nalgebra_glm as glm;
 extern crate test;
 
 use anyhow::Result;
+use chunk_stream::{ChunkAction, ChunkTracker};
 use gamedata::material::Material;
-use graphics::{camera::FlyingCamera, Mesh, Ray};
-use render::render_distance::calculate_chunk_diff;
+use geometry::Ray;
+use graphics::{camera::FlyingCamera, Mesh};
 use threadpool::ThreadPool;
 
 use std::{
@@ -27,22 +28,23 @@ use world::{
     mesh_generator::generate_greedy_mesh,
     slice::CubeSlice,
     traits::{Data3D, Generate, Voxelize},
-    ChunkData, ChunkId, PositionalSeed, Raycast, World, WorldPosition, WorldSeed, CHUNK_SIZE,
-    CHUNK_SIZE_I, CHUNK_SIZE_SAFE, CHUNK_SIZE_SAFE_CUBED,
+    ChunkData, ChunkId, ChunkUpdateData, PositionalSeed, Raycast, World, WorldPosition, WorldSeed,
+    CHUNK_SIZE, CHUNK_SIZE_F, CHUNK_SIZE_I, CHUNK_SIZE_SAFE, CHUNK_SIZE_SAFE_CUBED,
 };
 
+mod chunk_stream;
 pub mod models;
 pub mod render;
 pub mod systems;
 
 #[derive(Clone)]
-struct GeneratedChunk(ChunkId, ChunkData, Option<Mesh>);
+struct ChunkUpdate(ChunkId, ChunkData, Option<Mesh>);
 
-const RENDER_DISTANCE: i32 = CHUNK_SIZE_I * 4;
-const UNRENDER_DISTANCE: i32 = CHUNK_SIZE_I * 5;
+const RENDER_DISTANCE: f32 = CHUNK_SIZE_F * 4.0;
+const UNRENDER_DISTANCE: f32 = CHUNK_SIZE_F * 5.0;
 const PLAYER_BUILDING_REACH: f32 = 10.0;
 
-fn generate_chunk(world_seed: &WorldSeed, chunk_id: &ChunkId) -> GeneratedChunk {
+fn generate_chunk(world_seed: &WorldSeed, chunk_id: &ChunkId) -> ChunkUpdate {
     let chunk_seed = PositionalSeed::for_chunk(world_seed, chunk_id);
     let chunk = Chunk::generate(chunk_seed);
     let voxel_data = chunk.voxelize();
@@ -62,7 +64,7 @@ fn generate_chunk(world_seed: &WorldSeed, chunk_id: &ChunkId) -> GeneratedChunk 
 
     // println!("{LOG_WORLD} Generating chunk");
 
-    GeneratedChunk(chunk_id.clone(), compact_data, mesh)
+    ChunkUpdate(chunk_id.clone(), compact_data, mesh)
 }
 
 pub struct Engine {
@@ -70,15 +72,21 @@ pub struct Engine {
     world: World,
 }
 
+pub struct BlockUpdate {
+    pub position: WorldPosition,
+    pub material: Material,
+}
+
 impl Engine {
     pub fn create() -> Self {
+        println!("Creating engine");
         Self {
             camera: FlyingCamera::new(glm::vec3(0., 0., 64.)),
             world: World::new(),
         }
     }
 
-    pub fn update_camera(&mut self, delta_time: &f32) {
+    pub fn update_camera(&mut self, delta_time: &f32, godmode: bool) {
         if self.camera.input.is_pressed() {
             let acceleration = self.camera.cam.get_base_change_mat()
                 * self.camera.input.get_as_vec()
@@ -87,8 +95,14 @@ impl Engine {
 
             self.camera.movement.velocity += acceleration;
 
-            if self.camera.movement.velocity.magnitude() > 10. {
-                self.camera.movement.velocity.set_magnitude(10.)
+            let max_velocity = if godmode {
+                self.camera.movement.max_velocity * 10.0
+            } else {
+                self.camera.movement.max_velocity
+            };
+
+            if self.camera.movement.velocity.norm() > max_velocity {
+                self.camera.movement.velocity.set_magnitude(max_velocity)
             }
         } else {
             self.camera.movement.velocity = self
@@ -105,36 +119,45 @@ impl Engine {
             let ray = Ray::new(self.camera.cam.position, direction);
             let movement_range = 0.0..1.0;
 
-            // let allowed_movement_amount = match self.world.cast_ray(&ray, &movement_range) {
-            //     Some(distance) => desired_movement_amount.min(distance - 0.5),
-            //     None => desired_movement_amount,
-            // };
-            let allowed_movement_amount = desired_movement_amount;
+            let allowed_movement_amount = if godmode {
+                desired_movement_amount
+            } else {
+                match self.world.cast_ray(&ray, &movement_range) {
+                    Some(distance) => desired_movement_amount.min(distance - 0.5),
+                    None => desired_movement_amount,
+                }
+            };
 
             self.camera.cam.position += direction * allowed_movement_amount;
         }
     }
 
     pub fn run(mut self) -> Result<()> {
+        println!("Running engine");
         pretty_env_logger::init();
 
+        println!("Setting up multithreading");
         let thread_pool = ThreadPool::new("worker_thread", 7);
-        let (ready_chunks_tx, ready_chunks_rx) = mpsc::channel();
+        let (chunk_update_tx, chunk_update_rx) = mpsc::channel();
+        let mut chunk_stream = ChunkTracker::new(RENDER_DISTANCE, UNRENDER_DISTANCE);
 
-        // main loop
+        println!("Setting up window");
         let event_loop = EventLoop::new();
         let window = WindowBuilder::new()
             .with_title("Game")
             .with_inner_size(LogicalSize::new(800, 450))
             .build(&event_loop)?;
 
+        println!("Setting up app");
         let mut app = unsafe { App::create(&window)? };
 
+        println!("Setting up state");
         let mut destroying = false;
         let mut minimized = false;
         let mut focused = false;
         let mut grabbed = false;
         let mut cursor_visible = false;
+        let mut godmode = false;
 
         let center = PhysicalPosition::new(
             (window.inner_size().width / 2) as f64,
@@ -146,6 +169,8 @@ impl Engine {
         let mut _frame_counter = 0;
         let start = Instant::now();
         let mut seconds_since_start: u64 = 0;
+
+        println!("Entering event loop");
 
         event_loop.run(move |event, _, control_flow| {
             // *control_flow = ControlFlow::Poll;
@@ -159,12 +184,20 @@ impl Engine {
                         .duration_since(previous_frame_start)
                         .as_secs_f32();
 
-                    self.update_camera(delta_time);
-                    self.load_chunks(&thread_pool, ready_chunks_tx.clone(), &mut app);
+                    self.update_camera(delta_time, godmode);
+                    self.queue_chunk_changes(
+                        &thread_pool,
+                        chunk_update_tx.clone(),
+                        &mut app,
+                        &mut chunk_stream,
+                    );
 
-                    if let Ok(generated_chunk) = ready_chunks_rx.try_recv() {
-                        let GeneratedChunk(id, chunk_data, chunk_mesh) = generated_chunk;
-                        add_chunk(&id, chunk_data, chunk_mesh, &mut self.world, &mut app);
+                    while let Ok(generated_chunk) = chunk_update_rx.try_recv() {
+                        let ChunkUpdate(id, chunk_data, chunk_mesh) = generated_chunk;
+                        add_chunk_data(&id, chunk_data, &mut self.world);
+                        if let Some(mesh) = chunk_mesh {
+                            add_chunk_mesh(&mut app, &id, mesh, &mut self.world)
+                        }
                     }
 
                     previous_frame_start = current_frame_start;
@@ -217,16 +250,24 @@ impl Engine {
                             let building_range = 0.0..PLAYER_BUILDING_REACH;
                             if let Some(distance) = self.world.cast_ray(&ray, &building_range) {
                                 let hit = ray.point_on_ray(distance + correction);
-                                let pos = WorldPosition::from(&hit);
-
-                                if button == MouseButton::Left {
-                                    self.world.set_block(&pos, Material::Air);
+                                let position = WorldPosition::from(&hit);
+                                let chunk_id = ChunkId::from(&position);
+                                let material = if button == MouseButton::Left {
+                                    Material::Air
                                 } else {
-                                    self.world.set_block(&pos, Material::Debug);
-                                }
+                                    Material::Debug
+                                };
 
-                                let chunk_id = ChunkId::from(&pos);
-                                self.remesh_chunk(&chunk_id, &mut app);
+                                let update = BlockUpdate { position, material };
+                                let update_data =
+                                    self.world.chunk_manager.get_update_data(&chunk_id);
+
+                                let chunk_update_tx = chunk_update_tx.clone();
+                                thread_pool.execute(move || {
+                                    if let Some(update) = Self::update_chunk(update, update_data) {
+                                        chunk_update_tx.send(update).unwrap()
+                                    }
+                                })
                             }
                         }
                     }
@@ -281,6 +322,9 @@ impl Engine {
                                 Some(VirtualKeyCode::F1) => {
                                     unsafe { app.recreate_swapchain(&window) }.unwrap();
                                 }
+                                Some(VirtualKeyCode::Tab) => {
+                                    godmode = !godmode;
+                                }
                                 _ => {}
                             }
                         }
@@ -295,8 +339,9 @@ impl Engine {
         });
     }
 
-    fn remesh_chunk(&mut self, chunk_id: &ChunkId, app: &mut App) {
-        if let Some(chunk_data) = self.world.chunk_manager.get_data(&chunk_id) {
+    fn update_chunk(update: BlockUpdate, context: ChunkUpdateData) -> Option<ChunkUpdate> {
+        // read old data
+        if let Some(chunk_data) = context.chunk.data {
             let mut blocks = CubeSlice::<Material, CHUNK_SIZE_SAFE>::default();
 
             // center chunk
@@ -308,24 +353,15 @@ impl Engine {
                 }
             }
 
-            let adjecent_chunks = [
-                ChunkId::new(chunk_id.x - 1, chunk_id.y, chunk_id.z),
-                ChunkId::new(chunk_id.x + 1, chunk_id.y, chunk_id.z),
-                ChunkId::new(chunk_id.x, chunk_id.y - 1, chunk_id.z),
-                ChunkId::new(chunk_id.x, chunk_id.y + 1, chunk_id.z),
-                ChunkId::new(chunk_id.x, chunk_id.y, chunk_id.z - 1),
-                ChunkId::new(chunk_id.x, chunk_id.y, chunk_id.z + 1),
-            ];
-
             // x
-            if let Some(adjecent) = self.world.chunk_manager.get_data(&adjecent_chunks[0]) {
+            if let Some(adjecent) = &context.adjecent[0].data {
                 for y in 0..CHUNK_SIZE {
                     for z in 0..CHUNK_SIZE {
                         blocks.set(0, y + 1, z + 1, adjecent.get(CHUNK_SIZE - 1, y, z));
                     }
                 }
             }
-            if let Some(adjecent) = self.world.chunk_manager.get_data(&adjecent_chunks[1]) {
+            if let Some(adjecent) = &context.adjecent[1].data {
                 for y in 0..CHUNK_SIZE {
                     for z in 0..CHUNK_SIZE {
                         blocks.set(CHUNK_SIZE_SAFE - 1, y + 1, z + 1, adjecent.get(0, y, z));
@@ -334,14 +370,14 @@ impl Engine {
             }
 
             // y
-            if let Some(adjecent) = self.world.chunk_manager.get_data(&adjecent_chunks[2]) {
+            if let Some(adjecent) = &context.adjecent[2].data {
                 for x in 0..CHUNK_SIZE {
                     for z in 0..CHUNK_SIZE {
                         blocks.set(x + 1, 0, z + 1, adjecent.get(x, CHUNK_SIZE - 1, z));
                     }
                 }
             }
-            if let Some(adjecent) = self.world.chunk_manager.get_data(&adjecent_chunks[3]) {
+            if let Some(adjecent) = &context.adjecent[3].data {
                 for x in 0..CHUNK_SIZE {
                     for z in 0..CHUNK_SIZE {
                         blocks.set(x + 1, CHUNK_SIZE_SAFE - 1, z + 1, adjecent.get(x, 0, z));
@@ -350,14 +386,14 @@ impl Engine {
             }
 
             // x
-            if let Some(adjecent) = self.world.chunk_manager.get_data(&adjecent_chunks[4]) {
+            if let Some(adjecent) = &context.adjecent[4].data {
                 for x in 0..CHUNK_SIZE {
                     for y in 0..CHUNK_SIZE {
                         blocks.set(x + 1, y + 1, 0, adjecent.get(x, y, CHUNK_SIZE - 1));
                     }
                 }
             }
-            if let Some(adjecent) = self.world.chunk_manager.get_data(&adjecent_chunks[5]) {
+            if let Some(adjecent) = &context.adjecent[5].data {
                 for x in 0..CHUNK_SIZE {
                     for y in 0..CHUNK_SIZE {
                         blocks.set(x + 1, y + 1, CHUNK_SIZE_SAFE - 1, adjecent.get(x, y, 0));
@@ -365,67 +401,86 @@ impl Engine {
                 }
             }
 
-            let mesh = generate_greedy_mesh(&chunk_id, &blocks);
-            if !mesh.indices.is_empty() && !mesh.vertices.is_empty() {
-                add_mesh(app, &chunk_id, mesh, &mut self.world)
+            let pos_in_chunk = update.position.rem_euclid(CHUNK_SIZE_I);
+            blocks.set(
+                1 + pos_in_chunk.x as usize,
+                1 + pos_in_chunk.y as usize,
+                1 + pos_in_chunk.z as usize,
+                update.material,
+            );
+
+            let mesh = generate_greedy_mesh(&context.chunk.id, &blocks);
+            let opt_mesh = if !mesh.indices.is_empty() && !mesh.vertices.is_empty() {
+                Some(mesh)
             } else {
                 println!("WARNING: empty mesh after remeshing");
+                None
+            };
+            let data = compress(&blocks);
+
+            return Some(ChunkUpdate(context.chunk.id, data, opt_mesh));
+        }
+
+        None
+    }
+
+    fn queue_chunk_changes(
+        &mut self,
+        thread_pool: &ThreadPool,
+        new_chunks: mpsc::Sender<ChunkUpdate>,
+        app: &mut App,
+        chunk_stream: &mut ChunkTracker,
+    ) {
+        let actions = chunk_stream.update(&self.camera.cam.position);
+
+        if !actions.is_empty() {
+            println!("{} actions this frame", actions.len());
+        }
+
+        for action in actions {
+            let new_chunks = new_chunks.clone();
+            match action {
+                ChunkAction::Load(id) => self.load_chunk(id, thread_pool, new_chunks),
+                ChunkAction::Unload(id) => self.unload_chunk(id, app),
+                // ChunkAction::Update(id) => self.update_chunk(id),
             }
         }
     }
 
-    fn load_chunks(
+    fn unload_chunk(&mut self, chunk_id: ChunkId, app: &mut App) {
+        unsafe { app.unload_single_chunk(&chunk_id) }
+        self.world.mesh_manager.remove(&chunk_id);
+        self.world.chunk_manager.remove(&chunk_id);
+    }
+
+    fn load_chunk(
         &mut self,
+        chunk_id: ChunkId,
         thread_pool: &ThreadPool,
-        parking_lot: mpsc::Sender<GeneratedChunk>,
-        app: &mut App,
+        new_chunks: mpsc::Sender<ChunkUpdate>,
     ) {
-        let center = WorldPosition::from(&self.camera.cam.position);
-        let chunk_load = calculate_chunk_diff(
-            self.world.chunk_manager.ids(),
-            &center,
-            RENDER_DISTANCE,
-            UNRENDER_DISTANCE,
-        );
-
-        for id in chunk_load.add.iter() {
-            self.world.chunk_manager.set_requested(id);
-        }
-
-        for chunk_id in chunk_load.add {
-            let tx = parking_lot.clone();
-            let seed = self.world.seed.clone();
-            thread_pool.execute(move || {
-                let chunk = generate_chunk(&seed, &chunk_id);
-                tx.send(chunk).unwrap();
-            });
-        }
-
-        for chunk_id in chunk_load.remove {
-            unsafe { app.unload_single_chunk(&chunk_id) }
-            self.world.mesh_manager.remove(&chunk_id);
-            self.world.chunk_manager.remove(&chunk_id);
-        }
+        self.world.chunk_manager.set_requested(&chunk_id);
+        let seed = self.world.seed.clone();
+        thread_pool.execute(move || {
+            let chunk = generate_chunk(&seed, &chunk_id);
+            new_chunks.send(chunk).unwrap();
+        });
     }
 }
 
-fn add_chunk(
-    id: &ChunkId,
-    chunk_data: ChunkData,
-    chunk_mesh: Option<Mesh>,
-    world: &mut World,
-    app: &mut App,
-) {
+fn add_chunk_data(id: &ChunkId, chunk_data: ChunkData, world: &mut World) {
     world.chunk_manager.insert_data(&id, chunk_data);
-    if let Some(mesh) = chunk_mesh {
-        add_mesh(app, id, mesh, world);
-    }
 }
 
-fn add_mesh(app: &mut App, id: &ChunkId, mesh: Mesh, world: &mut World) {
+fn add_chunk_mesh(app: &mut App, id: &ChunkId, mesh: Mesh, world: &mut World) {
     unsafe {
         create_chunk_buffers(&app.instance, &app.device, &id, &mesh, &mut app.data).unwrap();
     };
 
     world.mesh_manager.insert(&id, mesh);
 }
+
+// fn remove_chunk_mesh(app: &mut App, id: &ChunkId, world: &mut World) {
+//     unsafe { app.unload_single_chunk(&id) }
+//     world.mesh_manager.remove(&id);
+// }

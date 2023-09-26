@@ -10,10 +10,11 @@ vulkanalia = { version = "=0.14.0", features = ["libloading", "window"] }
 anyhow = "1"
 winit = "0.24"
 log = "0.4"
-gamedata = { path = "../gamedata", version = "0.0.0" }
-world = { path = "../world", version = "0.0.0" }
-graphics = { path = "../graphics", version = "0.0.0" }
-palette = { path = "../palette" }
+gamedata.workspace = true
+world.workspace = true
+graphics.workspace = true
+palette.workspace = true
+resources.workspace = true
 thiserror = "1"
 nalgebra-glm = "0.10"
 png = "0.16"

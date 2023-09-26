@@ -3,12 +3,17 @@ use anyhow::Result;
 use graphics::Vertex;
 use vulkanalia::prelude::v1_0::*;
 
-pub unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()> {
-    let vert = std::fs::read("./shader/vert.spv").unwrap();
-    let frag = std::fs::read("./shader/frag.spv").unwrap();
+// #[cfg(target_os = "windows")]
+pub const SHADER_DIR: &str = "D:/Projects/rust-stuff/vulkan-rust/shader/";
+pub const VERT_PATH: &str = "D:/Projects/rust-stuff/vulkan-rust/shader/vert.spv";
+pub const FRAG_PATH: &str = "D:/Projects/rust-stuff/vulkan-rust/shader/frag.spv";
 
-    // let vert = include_bytes!("../../../shader/vert.spv");
-    // let frag = include_bytes!("../../../shader/frag.spv");
+pub unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()> {
+    let vert = std::fs::read(VERT_PATH).unwrap();
+    let frag = std::fs::read(FRAG_PATH).unwrap();
+
+    // let vert = include_bytes!("D:/Projects/rust-stuff/vulkan-rust/shader/vert.spv");
+    // let frag = include_bytes!("D:/Projects/rust-stuff/vulkan-rust/shader/frag.spv");
 
     let vert_shader_module = create_shader_module(device, &vert[..])?;
     let frag_shader_module = create_shader_module(device, &frag[..])?;
@@ -95,12 +100,12 @@ pub unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()>
     let vert_push_constant_range = vk::PushConstantRange::builder()
         .stage_flags(vk::ShaderStageFlags::VERTEX)
         .offset(0)
-        .size(64);
+        .size(68);
 
     let frag_push_constant_range = vk::PushConstantRange::builder()
         .stage_flags(vk::ShaderStageFlags::FRAGMENT)
         .offset(64)
-        .size(16);
+        .size(4);
 
     let set_layouts = &[data.descriptor_set_layout];
     let push_constant_ranges = &[vert_push_constant_range, frag_push_constant_range];

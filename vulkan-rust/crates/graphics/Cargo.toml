@@ -6,7 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-gamedata = {path = "../gamedata", version = "0.0.0"}
+gamedata.workspace = true
+geometry.workspace = true
 nalgebra-glm = "0.10"
 vulkanalia = { version = "=0.14.0" }
 winit = "0.24"

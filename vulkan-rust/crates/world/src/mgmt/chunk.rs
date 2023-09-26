@@ -1,10 +1,13 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
-use crate::{chunk_id::ChunkId, ChunkData};
+use crate::{chunk_id::ChunkId, ChunkData, ChunkIdAndData, ChunkUpdateData};
 
 pub struct ChunkManager {
     ids: BTreeSet<ChunkId>,
-    chunks: BTreeMap<ChunkId, Box<ChunkData>>,
+    chunks: BTreeMap<ChunkId, Arc<ChunkData>>,
 }
 
 impl ChunkManager {
@@ -20,7 +23,7 @@ impl ChunkManager {
     }
 
     pub fn insert_data(&mut self, id: &ChunkId, data: ChunkData) {
-        self.chunks.insert(id.clone(), Box::new(data));
+        self.chunks.insert(id.clone(), Arc::new(data));
     }
 
     pub fn set_requested(&mut self, id: &ChunkId) {
@@ -38,32 +41,53 @@ impl ChunkManager {
         }
     }
 
-    pub fn get_mut(&mut self, id: &ChunkId) -> Option<&mut ChunkData> {
-        match self.chunks.get_mut(id) {
-            Some(chunk_box) => Some(chunk_box),
-            None => None,
-        }
-    }
-
-    pub fn ids(&self) -> &BTreeSet<ChunkId> {
-        &self.ids
-    }
-
-    pub(crate) fn get_all(&self) -> Vec<(&ChunkId, &Box<ChunkData>)> {
-        self.chunks.iter().filter(|c| !c.1.is_empty()).collect()
-    }
-
     pub(crate) fn reset(&mut self) {
         self.ids.clear();
         self.chunks.clear();
+    }
+
+    pub fn get_update_data(&self, id: &ChunkId) -> ChunkUpdateData {
+        let adjecent_ids = id.get_adjecent();
+
+        ChunkUpdateData {
+            chunk: ChunkIdAndData {
+                id: *id,
+                data: self.chunks.get(id).cloned(),
+            },
+            adjecent: [
+                ChunkIdAndData {
+                    id: adjecent_ids[0],
+                    data: self.chunks.get(&adjecent_ids[0]).cloned(),
+                },
+                ChunkIdAndData {
+                    id: adjecent_ids[1],
+                    data: self.chunks.get(&adjecent_ids[1]).cloned(),
+                },
+                ChunkIdAndData {
+                    id: adjecent_ids[2],
+                    data: self.chunks.get(&adjecent_ids[2]).cloned(),
+                },
+                ChunkIdAndData {
+                    id: adjecent_ids[3],
+                    data: self.chunks.get(&adjecent_ids[3]).cloned(),
+                },
+                ChunkIdAndData {
+                    id: adjecent_ids[4],
+                    data: self.chunks.get(&adjecent_ids[4]).cloned(),
+                },
+                ChunkIdAndData {
+                    id: adjecent_ids[5],
+                    data: self.chunks.get(&adjecent_ids[5]).cloned(),
+                },
+            ],
+        }
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::{ChunkId, ChunkManager};
-    use crate::{traits::Data3D, ChunkData};
-    use gamedata::material::Material;
+    use crate::ChunkData;
 
     #[test]
     fn insert() {
@@ -83,16 +107,5 @@ mod test {
         let id2 = ChunkId::new(0, 1, 0);
         let chunk = cm.get_data(&id2);
         assert!(chunk.is_none());
-    }
-
-    #[test]
-    fn mutate() {
-        let mut cm = ChunkManager::new();
-        let id = ChunkId::new(0, 0, 0);
-        cm.insert_data(&id, ChunkData::default());
-        let chunk = cm.get_mut(&id).unwrap();
-
-        chunk.set(0, 0, 0, Material::Stone);
-        assert_eq!(chunk.get(0, 0, 0), Material::Stone);
     }
 }

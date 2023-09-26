@@ -3,21 +3,17 @@ use crate::{
     device::memory::get_memory_type_index,
 };
 use anyhow::{anyhow, Result};
-use std::{fs::File, ptr::copy_nonoverlapping as memcpy};
+use png::OutputInfo;
+use std::ptr::copy_nonoverlapping as memcpy;
 use vulkanalia::prelude::v1_0::*;
 
 pub unsafe fn create_texture_image(
     instance: &Instance,
     device: &Device,
     data: &mut AppData,
+    image: &(OutputInfo, Vec<u8>),
 ) -> Result<()> {
-    let image = File::open("crates/engine/src/resources/textures/viking_room.png")?;
-
-    let decoder = png::Decoder::new(image);
-    let (info, mut reader) = decoder.read_info()?;
-
-    let mut pixels = vec![0; info.buffer_size()];
-    reader.next_frame(&mut pixels)?;
+    let (info, pixels) = image;
 
     let size = info.buffer_size() as u64;
 
@@ -327,14 +323,14 @@ pub unsafe fn create_texture_sampler(device: &Device, data: &mut AppData) -> Res
         .address_mode_v(vk::SamplerAddressMode::REPEAT)
         .address_mode_w(vk::SamplerAddressMode::REPEAT)
         .anisotropy_enable(false)
-        .max_anisotropy(16.0)
+        // .max_anisotropy(16.0)
         .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
+        // .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+        // .mip_lod_bias(0.0)
+        // .min_lod(0.0)
+        // .max_lod(0.0);
         .compare_enable(false)
-        .compare_op(vk::CompareOp::ALWAYS)
-        .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
-        .mip_lod_bias(0.0)
-        .min_lod(0.0)
-        .max_lod(0.0);
+        .compare_op(vk::CompareOp::ALWAYS);
 
     data.texture_sampler = device.create_sampler(&info, None)?;
 

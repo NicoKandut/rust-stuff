@@ -18,6 +18,7 @@ use crate::{
 };
 use anyhow::{anyhow, Context, Result};
 use graphics::{camera::FlyingCamera, Frustum};
+use resources::prelude::CACHE;
 use std::{mem::size_of, ptr::copy_nonoverlapping as memcpy, time::Instant};
 use vulkanalia::{
     loader::{LibloadingLoader, LIBRARY},
@@ -61,7 +62,12 @@ impl App {
         create_command_pools(&instance, &device, &mut data)?;
         create_depth_objects(&instance, &device, &mut data)?;
         create_framebuffers(&device, &mut data)?;
-        create_texture_image(&instance, &device, &mut data)?;
+        create_texture_image(
+            &instance,
+            &device,
+            &mut data,
+            CACHE.get_img("D:/Projects/rust-stuff/vulkan-rust/assets/palette.png"),
+        )?;
         create_texture_image_view(&device, &mut data)?;
         create_texture_sampler(&device, &mut data)?;
         // load_model(&mut data)?;
@@ -235,12 +241,6 @@ impl App {
             })
             .collect::<Vec<_>>();
 
-        // println!(
-        //     "World has {} chunks. Rendering {} of them.",
-        //     world.manager.ids().len(),
-        //     secondary_command_buffers.len()
-        // );
-
         if secondary_command_buffers.len() > 0 {
             self.device
                 .cmd_execute_commands(command_buffer, &secondary_command_buffers[..]);
@@ -293,8 +293,7 @@ impl App {
         let (_, model_bytes, _) = model.as_slice().align_to::<u8>();
 
         let time = self.start.elapsed().as_secs_f32() / 20.0;
-        let light = glm::vec4(time.sin(), time.cos(), -2.0, 0.0).normalize();
-        let (_, light_bytes, _) = light.as_slice().align_to::<u8>();
+        let time_bytes = time.to_le_bytes();
 
         let inheritance_info = vk::CommandBufferInheritanceInfo::builder()
             .render_pass(self.data.render_pass)
@@ -338,9 +337,9 @@ impl App {
         self.device.cmd_push_constants(
             command_buffer,
             self.data.pipeline_layout,
-            vk::ShaderStageFlags::FRAGMENT,
+            vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
             64,
-            light_bytes,
+            &time_bytes,
         );
         self.device
             .cmd_draw_indexed(command_buffer, index_count as u32, 1, 0, 0, 0);
@@ -414,7 +413,7 @@ impl App {
             .iter()
             .for_each(|p| self.device.destroy_command_pool(*p, None));
 
-        self.device.destroy_sampler(self.data.texture_sampler, None);
+        // self.device.destroy_sampler(self.data.texture_sampler, None);
         self.device
             .destroy_image_view(self.data.texture_image_view, None);
         self.device.destroy_image(self.data.texture_image, None);

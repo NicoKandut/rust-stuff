@@ -18,8 +18,23 @@ impl ChunkId {
         diff[0].pow(2) + diff[1].pow(2) + diff[2].pow(2)
     }
 
-    pub fn center(&self) -> WorldPosition {
-        &WorldPosition::from(self) + HALF_CHUNK_I
+    pub fn center(&self) -> glm::Vec3 {
+        glm::vec3(
+            (self.x * CHUNK_SIZE_I + HALF_CHUNK_I) as f32,
+            (self.y * CHUNK_SIZE_I + HALF_CHUNK_I) as f32,
+            (self.z * CHUNK_SIZE_I + HALF_CHUNK_I) as f32,
+        )
+    }
+
+    pub fn get_adjecent(&self) -> [ChunkId; 6] {
+        [
+            ChunkId::new(self.x - 1, self.y, self.z),
+            ChunkId::new(self.x + 1, self.y, self.z),
+            ChunkId::new(self.x, self.y - 1, self.z),
+            ChunkId::new(self.x, self.y + 1, self.z),
+            ChunkId::new(self.x, self.y, self.z - 1),
+            ChunkId::new(self.x, self.y, self.z + 1),
+        ]
     }
 }
 

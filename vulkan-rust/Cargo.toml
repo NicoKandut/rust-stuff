@@ -4,3 +4,16 @@ resolver = "2"
 
 [profile.release]
 debug = 1
+
+[workspace.dependencies]
+engine = { path = "crates/engine" }
+gamedata = { path = "crates/gamedata" }
+geometry = { path = "crates/geometry" }
+graphics = { path = "crates/graphics" }
+octree = { path = "crates/octree" }
+palette = { path = "crates/palette" }
+physics = { path = "crates/physics" }
+resources = { path = "crates/resources" }
+threadpool = { path = "crates/threadpool" }
+vk_util = { path = "crates/vk_util" }
+world = { path = "crates/world" }
