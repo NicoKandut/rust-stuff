@@ -62,12 +62,13 @@ impl App {
         create_command_pools(&instance, &device, &mut data)?;
         create_depth_objects(&instance, &device, &mut data)?;
         create_framebuffers(&device, &mut data)?;
-        create_texture_image(
-            &instance,
-            &device,
-            &mut data,
-            CACHE.get_img("D:/Projects/rust-stuff/vulkan-rust/assets/palette.png"),
-        )?;
+        let palette = CACHE.get_img("D:/Projects/rust-stuff/vulkan-rust/assets/palette.png");
+        println!(
+            "Creating Palette on GPU: {}x{}",
+            palette.0.width, palette.0.height
+        );
+
+        create_texture_image(&instance, &device, &mut data, palette)?;
         create_texture_image_view(&device, &mut data)?;
         create_texture_sampler(&device, &mut data)?;
         // load_model(&mut data)?;

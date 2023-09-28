@@ -19,13 +19,13 @@ pub fn load_model(data: &mut AppData) -> Result<()> {
         for index in &model.mesh.indices {
             let pos_offset = (3 * index) as usize;
 
-            let vertex = Vertex::new(
+            let vertex = Vertex::from_material(
                 glm::vec3(
                     model.mesh.positions[pos_offset],
                     model.mesh.positions[pos_offset + 1],
                     model.mesh.positions[pos_offset + 2],
                 ),
-                palette::white(),
+                12,
                 glm::vec3(1.0, 1.0, 1.0), //TODO: take normal from mesh
             );
 

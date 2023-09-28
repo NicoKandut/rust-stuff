@@ -36,29 +36,37 @@ impl WorldPosition {
     }
 }
 
-impl Add<i32> for &WorldPosition {
+impl<T> Add<T> for WorldPosition
+where
+    T: Into<i32>,
+{
     type Output = WorldPosition;
-
-    fn add(self, rhs: i32) -> Self::Output {
+    fn add(self, rhs: T) -> Self::Output {
+        let rhs = rhs.into();
         Self::Output::new(self.x + rhs, self.y + rhs, self.z + rhs)
     }
 }
 
-impl Add<usize> for &WorldPosition {
+impl<T> Add<T> for &WorldPosition
+where
+    T: Into<i32>,
+{
     type Output = WorldPosition;
+    fn add(self, rhs: T) -> Self::Output {
+        let rhs = rhs.into();
+        Self::Output::new(self.x + rhs, self.y + rhs, self.z + rhs)
+    }
+}
 
-    fn add(self, rhs: usize) -> Self::Output {
-        Self::Output::new(
-            self.x + rhs as i32,
-            self.y + rhs as i32,
-            self.z + rhs as i32,
-        )
+impl Add<Self> for WorldPosition {
+    type Output = WorldPosition;
+    fn add(self, rhs: Self) -> Self::Output {
+        Self::Output::new(self.x + rhs.x, self.y + rhs.y, self.z + rhs.z)
     }
 }
 
 impl Add<Self> for &WorldPosition {
     type Output = WorldPosition;
-
     fn add(self, rhs: Self) -> Self::Output {
         Self::Output::new(self.x + rhs.x, self.y + rhs.y, self.z + rhs.z)
     }
@@ -76,11 +84,39 @@ where
     }
 }
 
-impl Sub<i32> for &WorldPosition {
+impl<T> Sub<T> for WorldPosition
+where
+    T: Into<i32>,
+{
     type Output = WorldPosition;
-
-    fn sub(self, rhs: i32) -> Self::Output {
+    fn sub(self, rhs: T) -> Self::Output {
+        let rhs = rhs.into();
         Self::Output::new(self.x - rhs, self.y - rhs, self.z - rhs)
+    }
+}
+
+impl<T> Sub<T> for &WorldPosition
+where
+    T: Into<i32>,
+{
+    type Output = WorldPosition;
+    fn sub(self, rhs: T) -> Self::Output {
+        let rhs = rhs.into();
+        Self::Output::new(self.x - rhs, self.y - rhs, self.z - rhs)
+    }
+}
+
+impl Sub<Self> for WorldPosition {
+    type Output = WorldPosition;
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self::Output::new(self.x - rhs.x, self.y - rhs.y, self.z - rhs.z)
+    }
+}
+
+impl Sub<Self> for &WorldPosition {
+    type Output = WorldPosition;
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self::Output::new(self.x - rhs.x, self.y - rhs.y, self.z - rhs.z)
     }
 }
 

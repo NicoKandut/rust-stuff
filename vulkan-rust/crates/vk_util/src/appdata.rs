@@ -134,7 +134,6 @@ pub unsafe fn create_descriptor_sets(device: &Device, data: &mut AppData) -> Res
             .buffer(data.uniform_buffers[i])
             .offset(0)
             .range(size_of::<UniformBufferObject>() as u64);
-
         let buffer_info = &[info];
         let ubo_write = vk::WriteDescriptorSet::builder()
             .dst_set(data.descriptor_sets[i])
@@ -147,7 +146,6 @@ pub unsafe fn create_descriptor_sets(device: &Device, data: &mut AppData) -> Res
             .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
             .image_view(data.texture_image_view)
             .sampler(data.texture_sampler);
-
         let image_info = &[info];
         let sampler_write = vk::WriteDescriptorSet::builder()
             .dst_set(data.descriptor_sets[i])

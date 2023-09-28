@@ -1,8 +1,6 @@
-use std::collections::BTreeMap;
-
-use graphics::Mesh;
-
 use crate::chunk_id::ChunkId;
+use graphics::Mesh;
+use std::collections::BTreeMap;
 
 pub struct MeshManager {
     pub meshes: BTreeMap<ChunkId, Box<Mesh>>,

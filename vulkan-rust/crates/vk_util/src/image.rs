@@ -15,6 +15,11 @@ pub unsafe fn create_texture_image(
 ) -> Result<()> {
     let (info, pixels) = image;
 
+    println!(
+        "Creating Image on GPU: {}x{}, {:?}",
+        info.width, info.height, pixels
+    );
+
     let size = info.buffer_size() as u64;
 
     let (staging_buffer, staging_buffer_memory) = create_buffer(
@@ -91,6 +96,7 @@ pub unsafe fn create_image(
     usage: vk::ImageUsageFlags,
     properties: vk::MemoryPropertyFlags,
 ) -> Result<(vk::Image, vk::DeviceMemory)> {
+    // assert!(height == 1);
     let info = vk::ImageCreateInfo::builder()
         .image_type(vk::ImageType::_2D)
         .extent(vk::Extent3D {
@@ -319,12 +325,13 @@ pub unsafe fn create_texture_sampler(device: &Device, data: &mut AppData) -> Res
     let info = vk::SamplerCreateInfo::builder()
         // .mag_filter(vk::Filter::LINEAR)
         // .min_filter(vk::Filter::LINEAR)
-        .address_mode_u(vk::SamplerAddressMode::REPEAT)
-        .address_mode_v(vk::SamplerAddressMode::REPEAT)
-        .address_mode_w(vk::SamplerAddressMode::REPEAT)
+        .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_BORDER)
+        .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_BORDER)
+        .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_BORDER)
         .anisotropy_enable(false)
         // .max_anisotropy(16.0)
         .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
+        .unnormalized_coordinates(true)
         // .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
         // .mip_lod_bias(0.0)
         // .min_lod(0.0)

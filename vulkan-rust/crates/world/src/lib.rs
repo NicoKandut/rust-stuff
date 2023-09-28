@@ -12,7 +12,7 @@ pub mod traits;
 
 pub use chunk_id::ChunkId;
 pub use mgmt::chunk::ChunkManager;
-pub use seed::{PositionalSeed, WorldSeed};
+pub use seed::{ChunkSeed, PositionalSeed, WorldSeed};
 pub use world_parameters::*;
 pub use world_position::WorldPosition;
 
@@ -75,9 +75,17 @@ pub struct World {
 }
 
 impl World {
-    pub fn new() -> Self {
+    pub fn random() -> Self {
         Self {
             seed: WorldSeed::new(thread_rng().gen()),
+            chunk_manager: ChunkManager::new(),
+            mesh_manager: MeshManager::new(),
+        }
+    }
+
+    pub fn new(seed: WorldSeed) -> Self {
+        Self {
+            seed,
             chunk_manager: ChunkManager::new(),
             mesh_manager: MeshManager::new(),
         }
@@ -96,7 +104,7 @@ impl World {
             (p[2] as i32 % CHUNK_SIZE as i32) as usize,
         ];
 
-        if let Some(chunk) = self.chunk_manager.get_data(&id) {
+        if let Some(chunk) = self.chunk_manager.get(&id) {
             chunk
                 .get(
                     position_in_chunk[0],
@@ -129,7 +137,7 @@ impl Raycast for World {
         let mut distance = 0.0;
 
         while limit.contains(&distance) {
-            if let Some(chunk_data) = self.chunk_manager.get_data(&chunk_id) {
+            if let Some(chunk_data) = self.chunk_manager.get(&chunk_id) {
                 let chunk_pos = glm::Vec3::from(&chunk_id);
                 let chunk_ray = Ray::new(ray.origin - chunk_pos, ray.direction);
                 if let Some(distance) = chunk_data.cast_ray(&chunk_ray, limit) {
@@ -171,11 +179,12 @@ impl Raycast for World {
 type TopNode<T> = L6Node<T>;
 
 #[derive(Clone, Default)]
-pub struct ChunkData(TopNode<Material>);
+pub struct ChunkData(TopNode<Material>, usize);
 
 impl Data3D<Material> for ChunkData {
     fn set(&mut self, x: usize, y: usize, z: usize, value: Material) {
-        self.0.set(x, y, z, value)
+        self.0.set(x, y, z, value);
+        self.1 += value.is_solid() as usize;
     }
 
     fn get(&self, x: usize, y: usize, z: usize) -> Material {
@@ -195,17 +204,17 @@ impl Raycast for ChunkData {
 
 impl ChunkData {
     pub fn is_empty(&self) -> bool {
-        match self {
-            Self(TopNode::Empty) => true,
+        match self.0 {
+            TopNode::Empty => true,
             _ => false,
         }
     }
 
     pub fn needs_mesh(&self) -> bool {
-        match self {
-            Self(TopNode::<Material>::Empty) => false,
-            Self(TopNode::<Material>::Full(m)) => !m.is_opaque(),
-            _ => true,
+        match self.0 {
+            TopNode::<Material>::Empty => false,
+            TopNode::<Material>::Full(m) => !m.is_opaque(),
+            TopNode::Sparse(_) => self.1 != CHUNK_SIZE_CUBED,
         }
     }
 }
@@ -413,7 +422,7 @@ mod tests {
     use nalgebra_glm::Vec3;
     use octree::{L1Node, L2Node, L3Node, L4Node, L5Node, L6Node};
 
-    use crate::{ChunkData, ChunkId, Raycast, World};
+    use crate::{ChunkData, ChunkId, Raycast, World, CHUNK_SIZE_CUBED};
 
     mod nodes {
 
@@ -686,12 +695,12 @@ mod tests {
 
     #[test]
     fn cast_into_full_negative_chunk() {
-        let mut world = World::new();
+        let mut world = World::random();
         let chunk_id = ChunkId::new(-2, -2, -2);
-        let data = ChunkData(L6Node::Full(Material::Stone));
+        let data = ChunkData(L6Node::Full(Material::Stone), CHUNK_SIZE_CUBED);
         let ray = Ray::new(Vec3::new(32.0, 32.0, 32.0), Vec3::new(-1.0, -1.0, -1.0));
 
-        world.chunk_manager.insert_data(&chunk_id, data);
+        world.chunk_manager.insert(&chunk_id, data);
 
         let hit = world
             .cast_ray(&ray, &LIMITS)
@@ -701,12 +710,12 @@ mod tests {
 
     #[test]
     fn cast_into_sparse_negative_chunk() {
-        let mut world = World::new();
+        let mut world = World::random();
         let chunk_id = ChunkId::new(-2, -2, -2);
-        let data = ChunkData(L6Node::Full(Material::Stone));
+        let data = ChunkData(L6Node::Full(Material::Stone), CHUNK_SIZE_CUBED);
         let ray = Ray::new(Vec3::new(32.0, 32.0, 32.0), Vec3::new(-1.0, -1.0, -1.0));
 
-        world.chunk_manager.insert_data(&chunk_id, data);
+        world.chunk_manager.insert(&chunk_id, data);
 
         let hit = world
             .cast_ray(&ray, &LIMITS)

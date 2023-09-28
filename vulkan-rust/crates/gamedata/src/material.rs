@@ -2,6 +2,7 @@ use std::mem::variant_count;
 
 const SOLID: u8 = 0b1000_0000;
 const OPAQUE: u8 = 0b0100_0000;
+const ID_MASK: u8 = 0b0011_1111;
 
 /**
  * First 2 bits determine solidity and opacity, all other bits are IDs.
@@ -43,27 +44,29 @@ impl Material {
     }
 
     pub fn color(&self) -> glm::Vec4 {
-        match *self {
-            Self::Air => palette::transparent(),
-            Self::Unset => palette::transparent(),
-            Self::Water => palette::water(),
-            Self::Glass => palette::transparent(),
-            Self::Stone => palette::stone(),
-            Self::Grass => palette::grass(),
-            Self::Sand => palette::sand(),
-            Self::Snow => palette::white(),
-            Self::Ice => palette::white(),
-            Self::Wood => palette::wood(),
-            Self::Leaves => palette::leaves(),
-            Self::Dirt => palette::dirt(),
-            Self::Debug => palette::red(),
-        }
+        // match *self {
+        //     Self::Air => palette::transparent(),
+        //     Self::Unset => palette::transparent(),
+        //     Self::Water => palette::water(),
+        //     Self::Glass => palette::transparent(),
+        //     Self::Stone => palette::stone(),
+        //     Self::Grass => palette::grass(),
+        //     Self::Sand => palette::sand(),
+        //     Self::Snow => palette::white(),
+        //     Self::Ice => palette::white(),
+        //     Self::Wood => palette::wood(),
+        //     Self::Leaves => palette::leaves(),
+        //     Self::Dirt => palette::dirt(),
+        //     Self::Debug => palette::red(),
+        // }
+
+        glm::vec4(u8::from(*self) as f32, 0.0, 0.0, 1.0)
     }
 
     pub fn color_bytes(&self) -> [u8; 4] {
         match *self {
-            Self::Air => palette::TRANSPARENT,
             Self::Unset => palette::TRANSPARENT,
+            Self::Air => palette::TRANSPARENT,
             Self::Water => palette::WATER,
             Self::Glass => palette::TRANSPARENT,
             Self::Stone => palette::STONE,
@@ -76,11 +79,13 @@ impl Material {
             Self::Dirt => palette::DIRT,
             Self::Debug => palette::RED,
         }
+
+        // [u8::from(*self), 0, 0, 255]
     }
 
     pub const ALL: [Material; variant_count::<Material>()] = [
-        Self::Air,
         Self::Unset,
+        Self::Air,
         Self::Water,
         Self::Glass,
         Self::Stone,
@@ -93,13 +98,6 @@ impl Material {
         Self::Dirt,
         Self::Debug,
     ];
-
-    pub fn index(&self) -> usize {
-        Self::ALL
-            .iter()
-            .position(|material| self == material)
-            .unwrap()
-    }
 }
 
 impl From<u8> for Material {
@@ -110,6 +108,6 @@ impl From<u8> for Material {
 
 impl From<Material> for u8 {
     fn from(value: Material) -> Self {
-        value as u8
+        value as u8 & ID_MASK
     }
 }

@@ -126,8 +126,6 @@ where
                     es[v] = end[v];
                     let ee = end;
 
-                    let c = m.color();
-
                     let vertices = [
                         [ss[0] as f32, ss[1] as f32, ss[2] as f32],
                         [se[0] as f32, se[1] as f32, se[2] as f32],
@@ -135,7 +133,7 @@ where
                         [ee[0] as f32, ee[1] as f32, ee[2] as f32],
                     ]
                     .map(|position| glm::vec3(position[0], position[1], position[2]))
-                    .map(|position| Vertex::new(position, c, normal));
+                    .map(|position| Vertex::from_material(position, m.into(), normal));
 
                     mesh.vertices.extend(vertices);
                     vertex_count += 4;
@@ -167,7 +165,7 @@ mod test {
         seed::{PositionalSeed, WorldSeed},
         slice::CubeSlice,
         traits::{Data3D, Generate, Voxelize},
-        CHUNK_SIZE_SAFE,
+        ChunkSeed, CHUNK_SIZE_SAFE,
     };
 
     use super::generate_greedy_mesh;
@@ -223,9 +221,10 @@ mod test {
         assert_eq!(mesh.vertices.len(), 24);
         assert_eq!(mesh.indices.len(), 36);
         for v in mesh.vertices {
-            assert!(v.pos.x >= 0.0 && v.pos.x <= 1.0);
-            assert!(v.pos.y >= 0.0 && v.pos.y <= 1.0);
-            assert!(v.pos.z >= 0.0 && v.pos.z <= 1.0);
+            assert!(v.pos_mat.x >= 0.0 && v.pos_mat.x <= 1.0);
+            assert!(v.pos_mat.y >= 0.0 && v.pos_mat.y <= 1.0);
+            assert!(v.pos_mat.z >= 0.0 && v.pos_mat.z <= 1.0);
+            assert!(v.pos_mat.w == f32::from(u8::from(Material::Stone)));
         }
     }
 
@@ -245,16 +244,17 @@ mod test {
         assert_eq!(mesh.vertices.len(), 24);
         assert_eq!(mesh.indices.len(), 36);
         for v in mesh.vertices {
-            assert!(v.pos.x >= 0.0 && v.pos.x <= 2.0);
-            assert!(v.pos.y >= 0.0 && v.pos.y <= 2.0);
-            assert!(v.pos.z >= 0.0 && v.pos.z <= 2.0);
+            assert!(v.pos_mat.x >= 0.0 && v.pos_mat.x <= 2.0);
+            assert!(v.pos_mat.y >= 0.0 && v.pos_mat.y <= 2.0);
+            assert!(v.pos_mat.z >= 0.0 && v.pos_mat.z <= 2.0);
+            assert!(v.pos_mat.w == f32::from(u8::from(Material::Stone)));
         }
     }
 
     #[bench]
     fn single_chunk_meshing17(b: &mut Bencher) {
         let id = ChunkId::new(17, 17, 17);
-        let chunk_seed = PositionalSeed::for_chunk(&WORLD_SEED, &id);
+        let chunk_seed = ChunkSeed::new(&WORLD_SEED, &id);
         let data = Chunk::generate(chunk_seed).voxelize();
 
         b.iter(|| {
@@ -265,7 +265,7 @@ mod test {
     #[bench]
     fn single_chunk_meshing0(b: &mut Bencher) {
         let id = ChunkId::new(0, 0, 0);
-        let chunk_seed = PositionalSeed::for_chunk(&WORLD_SEED, &id);
+        let chunk_seed = ChunkSeed::new(&WORLD_SEED, &id);
         let data = Chunk::generate(chunk_seed).voxelize();
 
         b.iter(|| {

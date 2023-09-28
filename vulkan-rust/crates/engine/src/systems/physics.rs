@@ -24,7 +24,7 @@ impl PhysicsSystem {
         PhysicsSystem {
             entities: Vec::new(),
             gravity_acceleration: -9.81,
-            world: World::new(),
+            world: World::random(),
         }
     }
 }

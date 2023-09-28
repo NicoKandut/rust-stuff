@@ -36,7 +36,10 @@ fn load_all_vox_models() -> HashMap<String, VoxModels<Model>> {
 }
 
 fn load_all_images() -> HashMap<String, (OutputInfo, Vec<u8>)> {
-    let img_paths = ["D:/Projects/rust-stuff/vulkan-rust/assets/palette.png"];
+    let img_paths = [
+        "D:/Projects/rust-stuff/vulkan-rust/assets/palette.png",
+        "D:/Projects/rust-stuff/vulkan-rust/assets/tileset.png",
+    ];
     let mut img = HashMap::with_capacity(img_paths.len());
     for path in img_paths {
         img.insert(path.to_owned(), read_image(path).unwrap());

@@ -17,3 +17,4 @@ resources = { path = "crates/resources" }
 threadpool = { path = "crates/threadpool" }
 vk_util = { path = "crates/vk_util" }
 world = { path = "crates/world" }
+logging = { path = "crates/logging" }

@@ -77,7 +77,7 @@ pub fn caves(seed: &WorldSeed, offset_x: i32, offset_y: i32, z: i32, size: usize
     let (noise, _min, _max) =
         NoiseBuilder::turbulence_3d_offset(x as f32, size, y as f32, size, z as f32, size)
             .with_seed(noise_id::CAVES + i32::from(seed))
-            .with_freq(0.008)
+            .with_freq(0.005)
             .with_octaves(2)
             .with_gain(2.0)
             .with_lacunarity(0.5)

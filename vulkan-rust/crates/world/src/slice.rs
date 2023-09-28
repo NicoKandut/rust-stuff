@@ -1,4 +1,4 @@
-use crate::traits::Data3D;
+use crate::{gen::chunk::in_chunk_data, traits::Data3D, CHUNK_SIZE_SAFE_I};
 
 pub type QuadSlice<T, const N: usize> = [[T; N]; N];
 
@@ -35,18 +35,18 @@ where
 {
     #[inline]
     fn set(&mut self, x: usize, y: usize, z: usize, value: T) {
-        if is_inside(x, y, z, 0, N, 0, N, 0, N) {
-            self.0[x][y][z] = value;
-        }
+        assert!(x < N);
+        assert!(y < N);
+        assert!(z < N);
+        self.0[x][y][z] = value;
     }
 
     #[inline]
     fn get(&self, x: usize, y: usize, z: usize) -> T {
-        if is_inside(x, y, z, 0, N, 0, N, 0, N) {
-            self.0[x][y][z]
-        } else {
-            Default::default()
-        }
+        assert!(x < N);
+        assert!(y < N);
+        assert!(z < N);
+        self.0[x][y][z]
     }
 }
 
@@ -58,20 +58,11 @@ pub struct Slice3<T> {
 impl<T> Slice3<T> {
     #[inline]
     fn index(&self, x: usize, y: usize, z: usize) -> usize {
-        let [size_x, size_y, ..] = self.dimensions;
-        let index = z * size_x * size_y + y * size_x + x;
-
-        debug_assert!(
-            index < self.data.len(),
-            "Slice to small. Size was {}. Index was {} ({},{},{})",
-            self.data.len(),
-            index,
-            x,
-            y,
-            z
-        );
-
-        index
+        let [size_x, size_y, size_z] = self.dimensions;
+        assert!(x < size_x);
+        assert!(y < size_y);
+        assert!(z < size_z);
+        z * size_x * size_y + y * size_x + x
     }
 }
 
@@ -87,8 +78,15 @@ where
         }
     }
 
-    pub fn write_into<D>(&self, dest: &mut D, offset_x: isize, offset_y: isize, offset_z: isize)
-    where
+    pub fn write_into<D>(
+        &self,
+        dest: &mut D,
+        offset_x: i32,
+        offset_y: i32,
+        offset_z: i32,
+        voxel_count: &mut usize,
+        overflow: &mut Vec<(i32, i32, i32, T)>,
+    ) where
         D: Data3D<T>,
     {
         let [end_x, end_y, end_z] = self.dimensions;
@@ -103,16 +101,38 @@ where
                 for x in start_x..end_x {
                     let value = self.data.get(index).unwrap();
                     if *value != T::default() {
-                        let dest_x = offset_x + x as isize;
-                        let dest_y = offset_y + y as isize;
-                        let dest_z = offset_z + z as isize;
+                        let dest_x = offset_x + x as i32;
+                        let dest_y = offset_y + y as i32;
+                        let dest_z = offset_z + z as i32;
+                        if dest_x >= 0
+                            && dest_x < CHUNK_SIZE_SAFE_I
+                            && dest_y >= 0
+                            && dest_y < CHUNK_SIZE_SAFE_I
+                            && dest_z >= 0
+                            && dest_z < CHUNK_SIZE_SAFE_I
+                        {
+                            let is_in_chunk =
+                                in_chunk_data(dest_x as usize, dest_y as usize, dest_z as usize);
 
-                        dest.set(
-                            dest_x as usize,
-                            dest_y as usize,
-                            dest_z as usize,
-                            value.clone(),
-                        );
+                            if dest.get(dest_x as usize, dest_y as usize, dest_z as usize)
+                                != Default::default()
+                            {
+                                if is_in_chunk {
+                                    *voxel_count += 1;
+                                }
+                            }
+
+                            dest.set(
+                                dest_x as usize,
+                                dest_y as usize,
+                                dest_z as usize,
+                                value.clone(),
+                            );
+
+                            if !is_in_chunk {
+                                overflow.push((0, 0, 0, value.clone()));
+                            }
+                        }
                     }
 
                     index += 1;
@@ -128,13 +148,11 @@ where
 {
     fn set(&mut self, x: usize, y: usize, z: usize, value: T) {
         let index = self.index(x, y, z);
-        if let Some(item) = self.data.get_mut(index) {
-            *item = value;
-        }
+        self.data[index] = value;
     }
 
     fn get(&self, x: usize, y: usize, z: usize) -> T {
         let index = self.index(x, y, z);
-        self.data.get(index).map_or(Default::default(), |x| *x)
+        self.data[index]
     }
 }

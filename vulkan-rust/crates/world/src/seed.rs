@@ -35,13 +35,6 @@ impl PositionalSeed {
         }
     }
 
-    pub fn for_chunk(world_seed: &WorldSeed, chunk_id: &ChunkId) -> Self {
-        Self {
-            world_seed: world_seed.clone(),
-            position: WorldPosition::from(chunk_id),
-        }
-    }
-
     pub fn pos(&self) -> &WorldPosition {
         &self.position
     }
@@ -50,6 +43,38 @@ impl PositionalSeed {
         let x = (self.position.x as u64) << 0;
         let y = (self.position.y as u64) << 16;
         let z = (self.position.z as u64) << 32;
+        let w = self.world_seed.0;
+
+        w ^ x ^ y ^ z
+    }
+
+    pub fn world_seed(&self) -> &WorldSeed {
+        &self.world_seed
+    }
+}
+
+#[derive(Clone)]
+pub struct ChunkSeed {
+    world_seed: WorldSeed,
+    id: ChunkId,
+}
+
+impl ChunkSeed {
+    pub fn new(world_seed: &WorldSeed, id: &ChunkId) -> Self {
+        Self {
+            world_seed: world_seed.clone(),
+            id: id.clone(),
+        }
+    }
+
+    pub fn id(&self) -> &ChunkId {
+        &self.id
+    }
+
+    pub fn value(&self) -> u64 {
+        let x = (self.id.x as u64) << 0;
+        let y = (self.id.y as u64) << 16;
+        let z = (self.id.z as u64) << 32;
         let w = self.world_seed.0;
 
         w ^ x ^ y ^ z
