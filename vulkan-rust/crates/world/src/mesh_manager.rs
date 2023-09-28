@@ -17,13 +17,6 @@ impl MeshManager {
         self.meshes.insert(*id, Box::new(mesh));
     }
 
-    pub fn get(&self, id: &ChunkId) -> Option<&Mesh> {
-        match self.meshes.get(id) {
-            Some(mesh_box) => Some(mesh_box),
-            None => None,
-        }
-    }
-
     pub fn get_all(&self) -> &BTreeMap<ChunkId, Box<Mesh>> {
         &self.meshes
     }

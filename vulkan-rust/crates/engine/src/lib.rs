@@ -8,10 +8,10 @@ use crate::world_thread::{MeshEvent, Request};
 use anyhow::Result;
 use gamedata::material::Material;
 use geometry::Ray;
-use graphics::{camera::FlyingCamera, Mesh};
+use graphics::camera::FlyingCamera;
 use logging::{log, LOG_ENGINE, LOG_RENDER};
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     sync::mpsc,
     time::{Duration, Instant},
 };
@@ -24,11 +24,7 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
 };
-use world::{
-    gen::chunk::compress, mesh_generator::generate_greedy_mesh, slice::CubeSlice, traits::Data3D,
-    ChunkData, ChunkId, ChunkUpdateData, Raycast, World, WorldPosition, CHUNK_SIZE, CHUNK_SIZE_F,
-    CHUNK_SIZE_I, CHUNK_SIZE_SAFE,
-};
+use world::{ChunkData, ChunkId, WorldPosition, CHUNK_SIZE_F};
 
 mod chunk_stream;
 pub mod models;
@@ -38,7 +34,6 @@ mod world_thread;
 
 #[derive(Clone)]
 struct ChunkUpdate(ChunkId, ChunkData, Instant);
-struct MeshUpdate(ChunkId, Mesh, Instant);
 
 const INITIAL_RENDER_DISTANCE: f32 = CHUNK_SIZE_F * 6.0;
 const INITIAL_UNRENDER_DISTANCE: f32 = CHUNK_SIZE_F * 7.0;
@@ -47,7 +42,7 @@ const MESH_TIME_WINDOW_SIZE: usize = 20;
 
 pub struct Engine {
     camera: FlyingCamera,
-    world: World,
+    meshes: HashMap<ChunkId, usize>,
 }
 
 pub struct BlockUpdate {
@@ -60,7 +55,7 @@ impl Engine {
         log!(*LOG_ENGINE, "Creating engine");
         Self {
             camera: FlyingCamera::new(glm::vec3(0., 0., 64.)),
-            world: World::random(),
+            meshes: HashMap::new(),
         }
     }
 
@@ -139,7 +134,7 @@ impl Engine {
                         &current_frame_start,
                     );
 
-                    unsafe { app.render(&window, &self.world, &self.camera) }.unwrap();
+                    unsafe { app.render(&window, &self.meshes, &self.camera) }.unwrap();
 
                     log_stats(
                         start,
@@ -314,29 +309,40 @@ impl Engine {
         mesh_times: &mut VecDeque<Duration>,
         current_frame_start: &Instant,
     ) {
-        const ALLOWED_FRAME_TIME: Duration = Duration::from_millis(6);
+        const ALLOWED_FRAME_TIME: Duration = Duration::from_millis(10);
+
+        let mut meshes_in_creation = vec![];
+        let mut meshes_in_destruction = vec![];
 
         while let Ok(mesh_event) = world_events.try_recv() {
             match mesh_event {
                 MeshEvent::Add(id, mesh, start) => {
-                    unsafe {
-                        create_chunk_buffers(&app.instance, &app.device, &id, &mesh, &mut app.data)
-                            .unwrap();
-                    };
-                    self.world.mesh_manager.insert(&id, mesh);
+                    self.meshes.insert(id, mesh.indices.len());
+                    meshes_in_creation.push((id, mesh));
                     mesh_times.push_back(start.elapsed());
                     if mesh_times.len() > MESH_TIME_WINDOW_SIZE {
                         mesh_times.pop_front();
                     }
                 }
                 MeshEvent::Remove(id) => {
-                    unsafe { app.unload_single_chunk(&id) }
-                    self.world.mesh_manager.remove(&id);
+                    meshes_in_destruction.push(id);
+                    self.meshes.remove(&id);
                 }
             }
             if current_frame_start.elapsed() > ALLOWED_FRAME_TIME {
                 break;
             }
+        }
+
+        for (id, mesh) in meshes_in_creation {
+            unsafe {
+                create_chunk_buffers(&app.instance, &app.device, &id, &mesh, &mut app.data)
+                    .unwrap();
+            };
+        }
+
+        for id in meshes_in_destruction {
+            unsafe { app.unload_single_chunk(&id) }
         }
     }
 
@@ -391,16 +397,17 @@ impl Engine {
         if self.camera.movement.velocity.norm() >= 0.01 {
             let desired_movement_amount = self.camera.movement.velocity.norm() * *delta_time;
             let direction = self.camera.movement.velocity.normalize();
-            let ray = Ray::new(self.camera.cam.position, direction);
-            let movement_range = 0.0..1.0;
+            // let ray = Ray::new(self.camera.cam.position, direction);
+            // let movement_range = 0.0..1.0;
 
             let allowed_movement_amount = if godmode {
                 desired_movement_amount
             } else {
-                match self.world.cast_ray(&ray, &movement_range) {
-                    Some(distance) => desired_movement_amount.min(distance - 0.5),
-                    None => desired_movement_amount,
-                }
+                // match self.world.cast_ray(&ray, &movement_range) {
+                //     Some(distance) => desired_movement_amount.min(distance - 0.5),
+                //     None => desired_movement_amount,
+                // }
+                desired_movement_amount
             };
 
             self.camera.cam.position += direction * allowed_movement_amount;

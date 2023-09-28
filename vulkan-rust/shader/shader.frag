@@ -25,7 +25,7 @@ void main() {
     // DISTANCE FOG
     vec4 fog_background = vec4(0.5,0.5,0.5,1);
     vec4 fog_weight = vec4(1,2,4,1);
-    vec4 lambda = exp(-0.00005 * fog_weight * fragDistance);
+    vec4 lambda = exp(-0.0005 * fog_weight * fragDistance);
 
     outColor = lambda * illuminated_color + (1-lambda) * fog_background;
     // outColor = material_color;

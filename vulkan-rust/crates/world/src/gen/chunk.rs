@@ -11,12 +11,11 @@ use gamedata::material::Material;
 use resources::prelude::CACHE;
 
 const CAVE_THRESHOLD: f32 = 0.002;
-const TREE_PATH: &str = "D:/Projects/rust-stuff/vulkan-rust/assets/tree.vox";
+const TREE_PATH: &str = "\\assets\\tree.vox";
 
 pub struct Chunk {
     seed: ChunkSeed,
     start: WorldPosition,
-    #[allow(unused)]
     rainfall: [f32; 4],
     temperature: [f32; 4],
 }
@@ -28,10 +27,11 @@ impl Generate<ChunkSeed> for Chunk {
         let mut temperature = [0.0; 4];
         let start = WorldPosition::from(seed.id());
 
+        let temp_rainfall = terrain_noise::chunk_rainfall(seed.world_seed(), &start);
         let temp_noise = terrain_noise::chunk_temperature(seed.world_seed(), &start);
 
         for i in 0..4 {
-            rainfall[i] = rng.f32();
+            rainfall[i] = temp_rainfall[i];
             temperature[i] = temp_noise[i];
         }
 
@@ -209,25 +209,26 @@ impl Chunk {
 
         let mut rng = fastrand::Rng::with_seed(self.seed.value());
 
-        let nr_trees = 4;
+        let nr_trees = 16;
         let tree_step = CHUNK_SIZE / nr_trees;
 
         for ix in 0..nr_trees {
             for iy in 0..nr_trees {
-                if rng.f32() < 0.2 {
+                let x = ix * tree_step + rng.usize(1..tree_step - 1);
+                let y = iy * tree_step + rng.usize(1..tree_step - 1);
+                let rainfall = chunk_bilerp(&self.rainfall, x as i32, y as i32);
+                if rng.f32() * rainfall < 0.05 {
                     continue;
                 }
 
-                let x = ix * tree_step + rng.usize(1..tree_step - 1);
-                let y = iy * tree_step + rng.usize(1..tree_step - 1);
                 let mut prev_material = data.get(x, y, CHUNK_SIZE_SAFE - 1);
                 for z in (1..CHUNK_SIZE_SAFE).rev() {
-                    if prev_material.is_solid() {
+                    if prev_material.is_surface() {
                         break;
                     }
 
                     let cur_material = data.get(x, y, z);
-                    if cur_material.is_solid() && !prev_material.is_solid() {
+                    if cur_material.is_surface() && !prev_material.is_surface() {
                         // let tree = Tree::generate(z as u64);
                         // let tree_voxels = tree.voxelize();
                         let r = 2;
@@ -236,7 +237,7 @@ impl Chunk {
                         let vox = CACHE.get_vox(TREE_PATH);
 
                         for voxel in rng.choice(vox.models.iter()).unwrap().voxels.iter() {
-                            let material = Material::from(voxel.color_index.0 - 1);
+                            let material = Material::from(voxel.color_index.0 - 1_u8);
 
                             let voxel_x = voxel.point.x as i32 - r + x as i32;
                             let voxel_y = voxel.point.y as i32 - r + y as i32;

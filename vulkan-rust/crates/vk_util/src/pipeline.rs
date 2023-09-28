@@ -4,9 +4,9 @@ use graphics::Vertex;
 use vulkanalia::prelude::v1_0::*;
 
 // #[cfg(target_os = "windows")]
-pub const SHADER_DIR: &str = "D:/Projects/rust-stuff/vulkan-rust/shader/";
-pub const VERT_PATH: &str = "D:/Projects/rust-stuff/vulkan-rust/shader/vert.spv";
-pub const FRAG_PATH: &str = "D:/Projects/rust-stuff/vulkan-rust/shader/frag.spv";
+pub const SHADER_DIR: &str = "shader/";
+pub const VERT_PATH: &str = "shader/vert.spv";
+pub const FRAG_PATH: &str = "shader/frag.spv";
 
 pub unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()> {
     let vert = std::fs::read(VERT_PATH).unwrap();

@@ -17,7 +17,8 @@ use world::{
     mesh_generator::generate_greedy_mesh,
     slice::CubeSlice,
     traits::{Data3D, Generate, Voxelize},
-    ChunkId, ChunkSeed, Raycast, World, WorldPosition, CHUNK_SIZE, CHUNK_SIZE_I, CHUNK_SIZE_SAFE,
+    ChunkId, ChunkSeed, Raycast, World, WorldPosition, WorldSeed, CHUNK_SIZE, CHUNK_SIZE_I,
+    CHUNK_SIZE_SAFE,
 };
 
 const REMESH_INTERVAL: Duration = Duration::from_millis(100);
@@ -56,7 +57,8 @@ pub(crate) fn spawn() -> (
         .spawn(move || {
             log!(*LOG_WORLD, "World Thread started");
 
-            let mut world = World::random();
+            let mut seed = WorldSeed::random();
+            let mut world = World::new(seed.clone());
             let mut dirty_chunks = HashSet::default();
             let mut overflow = Vec::new();
             let mut chunk_stream = ChunkTracker::new(0.0, 0.0);
@@ -188,43 +190,28 @@ fn mesh_dirty_chunks(
         log!(*LOG_WORLD, "{} dirty chunks", dirty_chunks.len());
     }
 
-    for id in dirty_chunks.drain() {
-        match world.chunk_manager.get(&id) {
+    dirty_chunks
+        .par_drain()
+        .filter_map(|id| match world.chunk_manager.get(&id) {
             Some(data) => {
                 if data.needs_mesh() {
                     let mesh = remesh(&id, &world);
                     if mesh.vertices.is_empty() {
                         log!(*LOG_WORLD, "[WARN] Empty mesh produced for {:?}", id);
                     } else {
-                        out_tx
-                            .send(MeshEvent::Add(id, mesh, Instant::now()))
-                            .expect("Render Thread must be available");
+                        return Some(MeshEvent::Add(id, mesh, Instant::now()));
                     }
                 }
-            }
-            None => {
-                out_tx
-                    .send(MeshEvent::Remove(id))
-                    .expect("Render Thread must be available");
-            }
-        }
 
-        // match mesh {
-        //     Some(mesh) if mesh.vertices.is_empty() => {
-        //         log!(*LOG_WORLD, "[WARN] Empty mesh produced")
-        //     }
-        //     Some(mesh) => {
-        //         out_tx
-        //             .send(MeshEvent::Add(id, mesh, Instant::now()))
-        //             .expect("Render Thread must be available");
-        //     }
-        //     None => {
-        //         out_tx
-        //             .send(MeshEvent::Remove(id))
-        //             .expect("Render Thread must be available");
-        //     }
-        // }
-    }
+                None
+            }
+            None => Some(MeshEvent::Remove(id)),
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .for_each(|event| {
+            out_tx.send(event).expect("Render Thread must be available");
+        })
 }
 
 fn process_chunk_actions(

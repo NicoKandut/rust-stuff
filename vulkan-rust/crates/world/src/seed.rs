@@ -1,3 +1,5 @@
+use rand::{thread_rng, Rng};
+
 use crate::{chunk_id::ChunkId, world_position::WorldPosition};
 
 #[derive(Clone)]
@@ -6,6 +8,10 @@ pub struct WorldSeed(u64);
 impl WorldSeed {
     pub const fn new(seed: u64) -> Self {
         Self(seed)
+    }
+
+    pub fn random() -> Self {
+        Self(thread_rng().gen())
     }
 }
 

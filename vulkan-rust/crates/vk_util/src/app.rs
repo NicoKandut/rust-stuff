@@ -19,7 +19,7 @@ use crate::{
 use anyhow::{anyhow, Context, Result};
 use graphics::{camera::FlyingCamera, Frustum};
 use resources::prelude::CACHE;
-use std::{mem::size_of, ptr::copy_nonoverlapping as memcpy, time::Instant};
+use std::{collections::HashMap, mem::size_of, ptr::copy_nonoverlapping as memcpy, time::Instant};
 use vulkanalia::{
     loader::{LibloadingLoader, LIBRARY},
     prelude::v1_0::*,
@@ -29,7 +29,7 @@ use vulkanalia::{
     window as vk_window,
 };
 use winit::window::Window;
-use world::{ChunkId, World, WorldPosition};
+use world::{mesh_manager::MeshManager, ChunkId, WorldPosition};
 
 #[derive(Clone, Debug)]
 pub struct App {
@@ -62,7 +62,7 @@ impl App {
         create_command_pools(&instance, &device, &mut data)?;
         create_depth_objects(&instance, &device, &mut data)?;
         create_framebuffers(&device, &mut data)?;
-        let palette = CACHE.get_img("D:/Projects/rust-stuff/vulkan-rust/assets/palette.png");
+        let palette = CACHE.get_img("\\assets\\palette.png");
         println!(
             "Creating Palette on GPU: {}x{}",
             palette.0.width, palette.0.height
@@ -97,7 +97,7 @@ impl App {
     pub unsafe fn render(
         &mut self,
         window: &Window,
-        world: &World,
+        meshes: &HashMap<ChunkId, usize>,
         cam: &FlyingCamera,
     ) -> Result<()> {
         let in_flight_fence = self.data.in_flight_fences[self.frame];
@@ -130,7 +130,7 @@ impl App {
 
         let vp = self.calculate_vp(cam);
 
-        self.update_command_buffer(image_index, world, &vp)?;
+        self.update_command_buffer(image_index, meshes, &vp)?;
         self.update_uniform_buffer(image_index, vp, glm::vec3_to_vec4(&cam.cam.position))?;
 
         let wait_semaphores = &[self.data.image_available_semaphores[self.frame]];
@@ -175,7 +175,7 @@ impl App {
     unsafe fn update_command_buffer(
         &mut self,
         image_index: usize,
-        world: &World,
+        meshes: &HashMap<ChunkId, usize>,
         vp: &(glm::Mat4, glm::Mat4),
     ) -> Result<()> {
         // println!("{LOG_VK} UPDATING ALL CMD BUFFERS");
@@ -222,14 +222,11 @@ impl App {
         let (view, proj) = vp;
         let frustum = Frustum::from_mat4(&(proj * view));
 
-        let secondary_command_buffers = world
-            .mesh_manager
-            .get_all()
+        let secondary_command_buffers = meshes
             .iter()
-            .filter_map(|(id, mesh)| {
+            .filter_map(|(id, index_count)| {
                 if frustum.intersects_aabb(&id.into()) {
-                    match self.update_secondary_command_buffer(image_index, id, mesh.indices.len())
-                    {
+                    match self.update_secondary_command_buffer(image_index, id, *index_count) {
                         Ok(cmd_buffer) => Some(cmd_buffer),
                         Err(_) => {
                             println!("Failed to update cmd buffer");

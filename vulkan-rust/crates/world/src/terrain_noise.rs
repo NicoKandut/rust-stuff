@@ -7,6 +7,7 @@ mod noise_id {
     pub const HEIGHT: i32 = 0;
     pub const TEMPERATURE: i32 = 1;
     pub const CAVES: i32 = 2;
+    pub const RAINFALL: i32 = 3;
 }
 
 pub fn height(seed: &WorldSeed, offset_x: i32, offset_y: i32, size: usize) -> Vec<f32> {
@@ -35,6 +36,25 @@ pub fn chunk_temperature(seed: &WorldSeed, position: &WorldPosition) -> Vec<f32>
     let (temp, ..) = NoiseBuilder::fbm_2d_offset(x, 2, y, 2)
         .with_seed(noise_id::TEMPERATURE + i32::from(seed))
         .with_freq(0.08)
+        .with_octaves(3)
+        .with_gain(2.0)
+        .with_lacunarity(0.5)
+        .generate();
+
+    // println!("Temperature: {:?} to {:?}", min, max);
+
+    debug_assert!(temp.len() == 4);
+
+    temp
+}
+
+pub fn chunk_rainfall(seed: &WorldSeed, position: &WorldPosition) -> Vec<f32> {
+    let x = (position.x / CHUNK_SIZE_I) as f32;
+    let y = (position.y / CHUNK_SIZE_I) as f32;
+
+    let (temp, ..) = NoiseBuilder::fbm_2d_offset(x, 2, y, 2)
+        .with_seed(noise_id::RAINFALL + i32::from(seed))
+        .with_freq(0.2)
         .with_octaves(3)
         .with_gain(2.0)
         .with_lacunarity(0.5)

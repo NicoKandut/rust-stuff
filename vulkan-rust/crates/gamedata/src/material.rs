@@ -34,6 +34,11 @@ impl Material {
     }
 
     #[inline]
+    pub fn is_surface(&self) -> bool {
+        *self == Material::Grass || *self == Material::Sand
+    }
+
+    #[inline]
     pub fn is_opaque(&self) -> bool {
         (*self as u8 & OPAQUE) != 0
     }

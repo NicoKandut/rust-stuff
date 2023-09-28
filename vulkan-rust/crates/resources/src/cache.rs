@@ -1,6 +1,6 @@
 use crate::{read_image, read_models};
 use png::OutputInfo;
-use std::collections::HashMap;
+use std::{collections::HashMap, env};
 use vox_format::{data::VoxModels, types::Model};
 
 pub struct Cache {
@@ -17,32 +17,35 @@ impl Cache {
     }
 
     pub fn get_vox(&self, path: &str) -> &VoxModels<Model> {
-        self.vox.get(path).unwrap()
+        self.vox.get(path).expect("Resource is required")
     }
 
     pub fn get_img(&self, path: &str) -> &(OutputInfo, Vec<u8>) {
-        self.img.get(path).unwrap()
+        self.img.get(path).expect("Resource is required")
     }
 }
 
 fn load_all_vox_models() -> HashMap<String, VoxModels<Model>> {
-    let vox_paths = ["D:/Projects/rust-stuff/vulkan-rust/assets/tree.vox"];
+    let vox_paths = ["\\assets\\tree.vox"];
+    let working_dir = env::current_dir().unwrap().to_str().unwrap().to_owned();
     let mut vox = HashMap::with_capacity(vox_paths.len());
     for path in vox_paths {
-        vox.insert(path.to_owned(), read_models(path));
+        let abs_path = working_dir.clone() + path;
+        println!("PATH: {:?}", abs_path);
+        vox.insert(path.to_owned(), read_models(&abs_path));
     }
 
     vox
 }
 
 fn load_all_images() -> HashMap<String, (OutputInfo, Vec<u8>)> {
-    let img_paths = [
-        "D:/Projects/rust-stuff/vulkan-rust/assets/palette.png",
-        "D:/Projects/rust-stuff/vulkan-rust/assets/tileset.png",
-    ];
+    let img_paths = ["\\assets\\palette.png", "\\assets\\tileset.png"];
     let mut img = HashMap::with_capacity(img_paths.len());
+    let working_dir = env::current_dir().unwrap().to_str().unwrap().to_owned();
     for path in img_paths {
-        img.insert(path.to_owned(), read_image(path).unwrap());
+        let abs_path = working_dir.clone() + path;
+        println!("PATH: {:?}", abs_path);
+        img.insert(path.to_owned(), read_image(&abs_path).unwrap());
     }
 
     img

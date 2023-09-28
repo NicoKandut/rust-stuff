@@ -71,7 +71,6 @@ impl From<&ChunkId> for WorldPosition {
 pub struct World {
     pub seed: WorldSeed,
     pub chunk_manager: ChunkManager,
-    pub mesh_manager: MeshManager,
 }
 
 impl World {
@@ -79,7 +78,6 @@ impl World {
         Self {
             seed: WorldSeed::new(thread_rng().gen()),
             chunk_manager: ChunkManager::new(),
-            mesh_manager: MeshManager::new(),
         }
     }
 
@@ -87,7 +85,6 @@ impl World {
         Self {
             seed,
             chunk_manager: ChunkManager::new(),
-            mesh_manager: MeshManager::new(),
         }
     }
 
