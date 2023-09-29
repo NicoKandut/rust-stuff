@@ -25,7 +25,6 @@ mod world_position;
 use gamedata::material::Material;
 use geometry::{Ray, AABB};
 use glm::Vec3;
-use mesh_manager::MeshManager;
 use octree::{L1Node, L2Node, L3Node, L4Node, L5Node, L6Node, LeafAccess};
 use rand::{thread_rng, Rng};
 use std::{ops::Range, sync::Arc};

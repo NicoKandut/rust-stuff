@@ -2497,6 +2497,7 @@ name = "resources"
 version = "0.0.0"
 dependencies = [
  "lazy_static",
+ "logging",
  "png 0.16.8",
  "vox-format",
 ]
@@ -2982,6 +2983,7 @@ dependencies = [
  "gamedata",
  "graphics",
  "log",
+ "logging",
  "nalgebra-glm",
  "palette",
  "png 0.16.8",

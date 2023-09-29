@@ -22,7 +22,6 @@ pub struct Chunk {
 
 impl Generate<ChunkSeed> for Chunk {
     fn generate(seed: ChunkSeed) -> Self {
-        let mut rng = fastrand::Rng::with_seed(seed.value());
         let mut rainfall = [0.0; 4];
         let mut temperature = [0.0; 4];
         let start = WorldPosition::from(seed.id());

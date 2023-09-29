@@ -3,7 +3,6 @@ use gamedata::material::Material;
 use geometry::Ray;
 use graphics::Mesh;
 use logging::{log, LOG_WORLD};
-use png::chunk;
 use rayon::prelude::*;
 use std::{
     collections::HashSet,
@@ -29,19 +28,18 @@ pub(crate) enum ModifyAction {
 }
 
 pub(crate) enum Request {
-    Move(glm::Vec3, Instant),
-    SetRenderDistance(f32, f32, Instant),
+    Move(glm::Vec3),
+    SetRenderDistance(f32, f32),
     Modify {
         ray: Ray,
         range: f32,
         action: ModifyAction,
-        start: Instant,
     },
     Exit,
 }
 
 pub(crate) enum MeshEvent {
-    Add(ChunkId, Mesh, Instant),
+    Add(ChunkId, Mesh),
     Remove(ChunkId),
 }
 
@@ -57,7 +55,7 @@ pub(crate) fn spawn() -> (
         .spawn(move || {
             log!(*LOG_WORLD, "World Thread started");
 
-            let mut seed = WorldSeed::random();
+            let seed = WorldSeed::random();
             let mut world = World::new(seed.clone());
             let mut dirty_chunks = HashSet::default();
             let mut overflow = Vec::new();
@@ -68,7 +66,7 @@ pub(crate) fn spawn() -> (
             'thread: loop {
                 'recv: while let Ok(request) = in_rx.recv_deadline(next_remesh) {
                     match request {
-                        Request::Move(center, start_time) => {
+                        Request::Move(center) => {
                             let actions = chunk_stream.set_center(center);
                             log!(
                                 *LOG_WORLD,
@@ -80,12 +78,11 @@ pub(crate) fn spawn() -> (
                                 &mut world,
                                 &out_tx,
                                 &thread_pool,
-                                start_time,
                                 &mut dirty_chunks,
                                 &mut overflow,
                             );
                         }
-                        Request::SetRenderDistance(load_distance, unload_distance, start_time) => {
+                        Request::SetRenderDistance(load_distance, unload_distance) => {
                             let actions =
                                 chunk_stream.set_distances(load_distance, unload_distance);
                             log!(
@@ -98,17 +95,11 @@ pub(crate) fn spawn() -> (
                                 &mut world,
                                 &out_tx,
                                 &thread_pool,
-                                start_time,
                                 &mut dirty_chunks,
                                 &mut overflow,
                             );
                         }
-                        Request::Modify {
-                            ray,
-                            range,
-                            action,
-                            start,
-                        } => {
+                        Request::Modify { ray, range, action } => {
                             log!(*LOG_WORLD, "Player attempts modification");
                             if let Some(distance) = world.cast_ray(&ray, &(0.0..range)) {
                                 let (correction, material) = match action {
@@ -199,7 +190,7 @@ fn mesh_dirty_chunks(
                     if mesh.vertices.is_empty() {
                         log!(*LOG_WORLD, "[WARN] Empty mesh produced for {:?}", id);
                     } else {
-                        return Some(MeshEvent::Add(id, mesh, Instant::now()));
+                        return Some(MeshEvent::Add(id, mesh));
                     }
                 }
 
@@ -219,7 +210,6 @@ fn process_chunk_actions(
     world: &mut World,
     out_tx: &mpsc::Sender<MeshEvent>,
     thread_pool: &ThreadPool,
-    start_time: Instant,
     dirty_chunks: &mut HashSet<ChunkId>,
     overflow_set: &mut Vec<(i32, i32, i32, Material)>,
 ) {

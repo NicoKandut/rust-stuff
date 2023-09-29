@@ -10,10 +10,11 @@ macro_rules! log {
 
 #[rustfmt::skip]
 lazy_static! {
-    pub static ref LOG_RENDER: String = "RENDER".blue() .to_string();
-    pub static ref LOG_VULKAN: String = "VULKAN".red()  .to_string();
-    pub static ref LOG_WORLD : String = "WORLD ".green().to_string();
+    pub static ref LOG_RENDER: String = "RENDER".blue()  .to_string();
+    pub static ref LOG_VULKAN: String = "VULKAN".red()   .to_string();
+    pub static ref LOG_WORLD : String = "WORLD ".green() .to_string();
     pub static ref LOG_ENGINE: String = "ENGINE".yellow().to_string();
+    pub static ref LOG_CACHE : String = "CACHE ".purple().to_string();
 }
 
 #[cfg(test)]

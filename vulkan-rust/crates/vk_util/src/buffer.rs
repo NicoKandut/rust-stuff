@@ -95,7 +95,8 @@ pub unsafe fn create_chunk_vertex_buffer(
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
     )?;
 
-    device.device_wait_idle().unwrap();
+    // TODO: not great causes stutter
+    // device.device_wait_idle().unwrap();
 
     let prev_buffer = data.chunk_vertex_buffers.insert(id.clone(), vertex_buffer);
     if let Some(b) = prev_buffer {
@@ -245,21 +246,22 @@ pub unsafe fn create_chunk_index_buffer(
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
     )?;
 
-    device.device_wait_idle().unwrap();
+    // TODO: not great causes stutter
+    // device.device_wait_idle().unwrap();
 
     let prev_buffer = data.chunk_index_buffer.insert(id.clone(), index_buffer);
-    if let Some(b) = prev_buffer {
-        // TODO: is destroying correct?
-        device.destroy_buffer(b, None);
-    }
+    // if let Some(b) = prev_buffer {
+    //     // TODO: is destroying correct? Yes but do it at a later poit with a queue
+    //     device.destroy_buffer(b, None);
+    // }
 
     let prev_memory = data
         .chunk_index_buffer_memory
         .insert(id.clone(), index_buffer_memory);
-    if let Some(m) = prev_memory {
-        // TODO: is freeing correct?
-        device.free_memory(m, None);
-    }
+    // if let Some(m) = prev_memory {
+    //     // TODO: is freeing correct?
+    //     device.free_memory(m, None);
+    // }
 
     copy_buffer(device, data, staging_buffer, index_buffer, size)?;
 

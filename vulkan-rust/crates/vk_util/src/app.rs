@@ -29,7 +29,7 @@ use vulkanalia::{
     window as vk_window,
 };
 use winit::window::Window;
-use world::{mesh_manager::MeshManager, ChunkId, WorldPosition};
+use world::{ChunkId, WorldPosition};
 
 #[derive(Clone, Debug)]
 pub struct App {
@@ -62,13 +62,12 @@ impl App {
         create_command_pools(&instance, &device, &mut data)?;
         create_depth_objects(&instance, &device, &mut data)?;
         create_framebuffers(&device, &mut data)?;
-        let palette = CACHE.get_img("\\assets\\palette.png");
-        println!(
-            "Creating Palette on GPU: {}x{}",
-            palette.0.width, palette.0.height
-        );
-
-        create_texture_image(&instance, &device, &mut data, palette)?;
+        create_texture_image(
+            &instance,
+            &device,
+            &mut data,
+            CACHE.get_img("\\assets\\palette.png"),
+        )?;
         create_texture_image_view(&device, &mut data)?;
         create_texture_sampler(&device, &mut data)?;
         // load_model(&mut data)?;
@@ -471,10 +470,14 @@ impl App {
         for (_, memory) in &self.data.chunk_vertex_buffers_memory {
             self.device.free_memory(*memory, None);
         }
+
+        self.data.chunk_index_buffer.clear();
+        self.data.chunk_index_buffer_memory.clear();
+        self.data.chunk_vertex_buffers.clear();
+        self.data.chunk_vertex_buffers_memory.clear();
     }
 
     pub unsafe fn unload_single_chunk(&mut self, id: &ChunkId) {
-        self.device.device_wait_idle().unwrap();
         if let Some(buffer) = self.data.chunk_index_buffer.remove(id) {
             self.device.destroy_buffer(buffer, None);
         }

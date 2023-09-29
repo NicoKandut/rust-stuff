@@ -4,14 +4,17 @@
 extern crate nalgebra_glm as glm;
 extern crate test;
 
-use crate::world_thread::{MeshEvent, Request};
+use crate::{
+    stats::Stats,
+    world_thread::{MeshEvent, Request},
+};
 use anyhow::Result;
 use gamedata::material::Material;
 use geometry::Ray;
 use graphics::camera::FlyingCamera;
-use logging::{log, LOG_ENGINE, LOG_RENDER};
+use logging::{log, LOG_ENGINE};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     sync::mpsc,
     time::{Duration, Instant},
 };
@@ -29,6 +32,7 @@ use world::{ChunkData, ChunkId, WorldPosition, CHUNK_SIZE_F};
 mod chunk_stream;
 pub mod models;
 pub mod render;
+mod stats;
 pub mod systems;
 mod world_thread;
 
@@ -38,7 +42,7 @@ struct ChunkUpdate(ChunkId, ChunkData, Instant);
 const INITIAL_RENDER_DISTANCE: f32 = CHUNK_SIZE_F * 6.0;
 const INITIAL_UNRENDER_DISTANCE: f32 = CHUNK_SIZE_F * 7.0;
 const PLAYER_BUILDING_REACH: f32 = 10.0;
-const MESH_TIME_WINDOW_SIZE: usize = 20;
+const STAT_INTERVAL: Duration = Duration::from_secs(1);
 
 pub struct Engine {
     camera: FlyingCamera,
@@ -69,7 +73,6 @@ impl Engine {
             .send(Request::SetRenderDistance(
                 INITIAL_RENDER_DISTANCE,
                 INITIAL_UNRENDER_DISTANCE,
-                Instant::now(),
             ))
             .expect("World Thread must be available");
 
@@ -79,149 +82,143 @@ impl Engine {
             .with_title("Game")
             .with_inner_size(LogicalSize::new(800, 450))
             .build(&event_loop)?;
-
-        log!(*LOG_ENGINE, "Setting up app");
-        let mut app = unsafe { App::create(&window)? };
-
-        log!(*LOG_ENGINE, "Setting up state");
-        let mut destroying = false;
-        let mut minimized = false;
-        let mut focused = false;
-        let mut grabbed = false;
-        let mut cursor_visible = false;
-        let mut godmode = false;
-        let mut render_distance = INITIAL_RENDER_DISTANCE;
-        let mut unrender_distance = INITIAL_UNRENDER_DISTANCE;
-
         let center = PhysicalPosition::new(
             (window.inner_size().width / 2) as f64,
             (window.inner_size().height / 2) as f64,
         );
 
-        let mut previous_frame_start = Instant::now();
+        log!(*LOG_ENGINE, "Setting up app");
+        let mut app = unsafe { App::create(&window)? };
 
-        let mut frame_counter = 0;
+        log!(*LOG_ENGINE, "Setting up state");
+        // Window state
+        let mut destroying = false;
+        let mut minimized = false;
+        let mut focused = false;
+        let mut grabbed = false;
+        let mut cursor_visible = false;
+        // Game state
+        let mut godmode = false;
+        let mut render_distance = INITIAL_RENDER_DISTANCE;
+        let mut unrender_distance = INITIAL_UNRENDER_DISTANCE;
+
         let start = Instant::now();
-        let mut seconds_since_start: u64 = 0;
+        let mut stats = Stats::new();
 
-        let mut last_sent_position = glm::vec3(0.0, 0.0, 0.0);
+        let mut previous_frame_start = start;
+
+        let mut last_sent_position = glm::vec3(-100000.0, 100000.0, 100000.0);
         let mut last_sent_time = start;
 
-        let mut mesh_times = VecDeque::with_capacity(MESH_TIME_WINDOW_SIZE);
+        event_loop.run(move |event, _, control_flow| match event {
+            Event::MainEventsCleared if !destroying && !minimized => {
+                let current_frame_start = Instant::now();
+                let delta_time = &current_frame_start
+                    .duration_since(previous_frame_start)
+                    .as_secs_f32();
 
-        println!("Entering event loop");
+                self.update_camera(delta_time, godmode);
+                self.send_world_thread_move_request(
+                    &world_requests,
+                    &mut last_sent_time,
+                    &mut last_sent_position,
+                );
+                self.receive_mesh_events(&world_events, &mut app, &current_frame_start);
 
-        event_loop.run(move |event, _, control_flow| {
-            // *control_flow = ControlFlow::Poll;
+                unsafe { app.render(&window, &self.meshes, &self.camera) }.unwrap();
 
-            match event {
-                Event::MainEventsCleared if !destroying && !minimized => {
-                    let current_frame_start = Instant::now();
-                    let delta_time = &current_frame_start
-                        .duration_since(previous_frame_start)
-                        .as_secs_f32();
+                stats.add_frame();
+                stats.log_interval(&STAT_INTERVAL);
 
-                    self.update_camera(delta_time, godmode);
-                    self.send_world_thread_move_request(
-                        &world_requests,
-                        &mut last_sent_time,
-                        &mut last_sent_position,
-                    );
-                    self.receive_mesh_events(
-                        &world_events,
-                        &mut app,
-                        &mut mesh_times,
-                        &current_frame_start,
-                    );
-
-                    unsafe { app.render(&window, &self.meshes, &self.camera) }.unwrap();
-
-                    log_stats(
-                        start,
-                        current_frame_start,
-                        &mut seconds_since_start,
-                        &mut frame_counter,
-                        &mut mesh_times,
-                    );
-
-                    frame_counter += 1;
-                    previous_frame_start = current_frame_start;
+                previous_frame_start = current_frame_start;
+            }
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::Resized(size) => {
+                    if size.width == 0 || size.height == 0 {
+                        minimized = true;
+                    } else {
+                        minimized = false;
+                        app.resized = true;
+                    }
                 }
-                Event::WindowEvent { event, .. } => match event {
-                    WindowEvent::Resized(size) => {
-                        if size.width == 0 || size.height == 0 {
-                            minimized = true;
-                        } else {
-                            minimized = false;
-                            app.resized = true;
+                WindowEvent::CloseRequested => {
+                    destroying = true;
+                    *control_flow = ControlFlow::Exit;
+                    world_requests
+                        .send(world_thread::Request::Exit)
+                        .expect("World Thread must be available");
+                    unsafe {
+                        app.destroy();
+                    }
+                }
+                WindowEvent::MouseInput { state, button, .. } if focused => {
+                    let ray = Ray::new(
+                        self.camera.cam.position,
+                        self.camera.cam.direction().normalize(),
+                    );
+                    match (button, state) {
+                        (MouseButton::Left, ElementState::Pressed) => {
+                            world_requests
+                                .send(world_thread::Request::Modify {
+                                    ray: ray.clone(),
+                                    range: PLAYER_BUILDING_REACH,
+                                    action: world_thread::ModifyAction::Remove,
+                                })
+                                .expect("World Thread must be available");
                         }
-                    }
-                    WindowEvent::CloseRequested => {
-                        destroying = true;
-                        *control_flow = ControlFlow::Exit;
-                        world_requests
-                            .send(world_thread::Request::Exit)
-                            .expect("World Thread must be available");
-                        unsafe {
-                            app.destroy();
+                        (MouseButton::Right, ElementState::Pressed) => {
+                            world_requests
+                                .send(world_thread::Request::Modify {
+                                    ray: ray.clone(),
+                                    range: PLAYER_BUILDING_REACH,
+                                    action: world_thread::ModifyAction::Place(Material::Debug),
+                                })
+                                .expect("World Thread must be available");
                         }
+                        (MouseButton::Middle, ElementState::Pressed) => {}
+                        _ => {}
                     }
-                    WindowEvent::MouseInput { state, button, .. } => {
-                        if !focused
-                            && state == ElementState::Released
-                            && button == MouseButton::Left
-                        {
-                            focused = true;
-                            grabbed = true;
-                            cursor_visible = false;
-                            window.set_cursor_grab(true).expect("Cursor lock failed");
-                            window.set_cursor_visible(false);
-                        } else if focused && state == ElementState::Released {
-                            let ray = Ray::new(
-                                self.camera.cam.position,
-                                self.camera.cam.direction().normalize(),
-                            );
-
-                            match button {
-                                MouseButton::Left => {
-                                    world_requests
-                                        .send(world_thread::Request::Modify {
-                                            ray: ray.clone(),
-                                            range: PLAYER_BUILDING_REACH,
-                                            action: world_thread::ModifyAction::Remove,
-                                            start: Instant::now(),
-                                        })
-                                        .expect("World Thread must be available");
-                                }
-                                MouseButton::Right => {
-                                    world_requests
-                                        .send(world_thread::Request::Modify {
-                                            ray: ray.clone(),
-                                            range: PLAYER_BUILDING_REACH,
-                                            action: world_thread::ModifyAction::Place(
-                                                Material::Debug,
-                                            ),
-                                            start: Instant::now(),
-                                        })
-                                        .expect("World Thread must be available");
-                                }
-                                MouseButton::Middle => {}
-                                _ => {}
-                            }
-                        }
-                    }
-                    WindowEvent::Focused(new_focus) => {
-                        focused = new_focus;
-                        grabbed = new_focus;
-                        cursor_visible = !new_focus;
-                        window
-                            .set_cursor_grab(new_focus)
-                            .expect("Cursor lock failed");
-                        window.set_cursor_visible(!new_focus);
-                    }
-                    WindowEvent::KeyboardInput { input, .. } => {
-                        // gain focus & enable FPS controls
-                        match input.virtual_keycode {
+                }
+                WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    button: MouseButton::Left,
+                    ..
+                } if !focused => {
+                    set_focus(
+                        true,
+                        &window,
+                        &mut focused,
+                        &mut grabbed,
+                        &mut cursor_visible,
+                    );
+                }
+                WindowEvent::Focused(new_focus) => {
+                    set_focus(
+                        new_focus,
+                        &window,
+                        &mut focused,
+                        &mut grabbed,
+                        &mut cursor_visible,
+                    );
+                }
+                WindowEvent::CursorMoved { position, .. } if grabbed && !cursor_visible => {
+                    let (x, y) = (center.x - position.x, center.y - position.y);
+                    window
+                        .set_cursor_position(center)
+                        .expect("Cursor position setting failed");
+                    self.camera.cam.add_pitch((y * 0.1) as f32);
+                    self.camera.cam.add_yaw((x * 0.1) as f32);
+                }
+                _ => {}
+            },
+            Event::DeviceEvent { event, .. } if focused => match event {
+                DeviceEvent::Key(KeyboardInput {
+                    state,
+                    virtual_keycode,
+                    ..
+                }) => {
+                    if state == ElementState::Pressed {
+                        match virtual_keycode {
                             Some(VirtualKeyCode::Escape) => {
                                 grabbed = false;
                                 cursor_visible = true;
@@ -229,74 +226,45 @@ impl Engine {
                                 window.set_cursor_grab(false).expect("Cursor lock failed");
                                 window.set_cursor_visible(true);
                             }
+                            Some(VirtualKeyCode::F1) => {
+                                unsafe { app.recreate_swapchain(&window) }.unwrap();
+                            }
+                            Some(VirtualKeyCode::Tab) => {
+                                godmode = !godmode;
+                            }
+                            Some(VirtualKeyCode::Up) => {
+                                render_distance += CHUNK_SIZE_F;
+                                unrender_distance += CHUNK_SIZE_F;
+                                world_requests
+                                    .send(Request::SetRenderDistance(
+                                        render_distance,
+                                        unrender_distance,
+                                    ))
+                                    .expect("World Thread must be available");
+                            }
+                            Some(VirtualKeyCode::Down) => {
+                                render_distance -= CHUNK_SIZE_F;
+                                unrender_distance -= CHUNK_SIZE_F;
+                                world_requests
+                                    .send(Request::SetRenderDistance(
+                                        render_distance,
+                                        unrender_distance,
+                                    ))
+                                    .expect("World Thread must be available");
+                            }
                             _ => (),
                         }
                     }
-                    WindowEvent::CursorMoved { position, .. } => {
-                        if grabbed && focused && !cursor_visible {
-                            let (x, y) = (center.x - position.x, center.y - position.y);
-                            window
-                                .set_cursor_position(center)
-                                .expect("Cursor position setting failed");
-                            self.camera.cam.add_pitch((y * 0.1) as f32);
-                            self.camera.cam.add_yaw((x * 0.1) as f32);
-                        }
-                    }
-                    _ => {}
-                },
-                Event::DeviceEvent {
-                    event:
-                        DeviceEvent::Key(KeyboardInput {
-                            state,
-                            virtual_keycode,
-                            ..
-                        }),
-                    ..
-                } => {
-                    if focused {
-                        let pressed = state == ElementState::Pressed;
 
-                        if pressed {
-                            match virtual_keycode {
-                                Some(VirtualKeyCode::F1) => {
-                                    unsafe { app.recreate_swapchain(&window) }.unwrap();
-                                }
-                                Some(VirtualKeyCode::Tab) => {
-                                    godmode = !godmode;
-                                }
-                                Some(VirtualKeyCode::Up) => {
-                                    render_distance += CHUNK_SIZE_F;
-                                    unrender_distance += CHUNK_SIZE_F;
-                                    world_requests
-                                        .send(Request::SetRenderDistance(
-                                            render_distance,
-                                            unrender_distance,
-                                            Instant::now(),
-                                        ))
-                                        .expect("World Thread must be available");
-                                }
-                                Some(VirtualKeyCode::Down) => {
-                                    render_distance -= CHUNK_SIZE_F;
-                                    unrender_distance -= CHUNK_SIZE_F;
-                                    world_requests
-                                        .send(Request::SetRenderDistance(
-                                            render_distance,
-                                            unrender_distance,
-                                            Instant::now(),
-                                        ))
-                                        .expect("World Thread must be available");
-                                }
-                                _ => {}
-                            }
-                        }
-
-                        if let Some(key) = virtual_keycode {
-                            self.camera.input.set_key(key, pressed);
-                        }
+                    if let Some(key) = virtual_keycode {
+                        self.camera
+                            .input
+                            .set_key(key, state == ElementState::Pressed);
                     }
                 }
                 _ => {}
-            }
+            },
+            _ => {}
         })
 
         // world_thread.join().expect("World thread should not panic");
@@ -306,43 +274,27 @@ impl Engine {
         &mut self,
         world_events: &mpsc::Receiver<MeshEvent>,
         app: &mut App,
-        mesh_times: &mut VecDeque<Duration>,
         current_frame_start: &Instant,
     ) {
         const ALLOWED_FRAME_TIME: Duration = Duration::from_millis(10);
 
-        let mut meshes_in_creation = vec![];
-        let mut meshes_in_destruction = vec![];
-
         while let Ok(mesh_event) = world_events.try_recv() {
             match mesh_event {
-                MeshEvent::Add(id, mesh, start) => {
-                    self.meshes.insert(id, mesh.indices.len());
-                    meshes_in_creation.push((id, mesh));
-                    mesh_times.push_back(start.elapsed());
-                    if mesh_times.len() > MESH_TIME_WINDOW_SIZE {
-                        mesh_times.pop_front();
-                    }
+                MeshEvent::Add(id, mesh) => {
+                    unsafe {
+                        self.meshes.insert(id, mesh.indices.len());
+                        create_chunk_buffers(&app.instance, &app.device, &id, &mesh, &mut app.data)
+                            .unwrap();
+                    };
                 }
                 MeshEvent::Remove(id) => {
-                    meshes_in_destruction.push(id);
                     self.meshes.remove(&id);
+                    unsafe { app.unload_single_chunk(&id) } // TODO: do this in deletion queue
                 }
             }
             if current_frame_start.elapsed() > ALLOWED_FRAME_TIME {
                 break;
             }
-        }
-
-        for (id, mesh) in meshes_in_creation {
-            unsafe {
-                create_chunk_buffers(&app.instance, &app.device, &id, &mesh, &mut app.data)
-                    .unwrap();
-            };
-        }
-
-        for id in meshes_in_destruction {
-            unsafe { app.unload_single_chunk(&id) }
         }
     }
 
@@ -362,7 +314,7 @@ impl Engine {
             *last_sent_time = Instant::now();
 
             world_requests
-                .send(Request::Move(*last_sent_position, *last_sent_time))
+                .send(Request::Move(*last_sent_position))
                 .expect("World Thread must be available");
         }
     }
@@ -415,22 +367,18 @@ impl Engine {
     }
 }
 
-fn log_stats(
-    start: Instant,
-    current_frame_start: Instant,
-    seconds_since_start: &mut u64,
-    frame_counter: &mut i32,
-    mesh_times: &mut VecDeque<Duration>,
+fn set_focus(
+    new_focus: bool,
+    window: &winit::window::Window,
+    focused: &mut bool,
+    grabbed: &mut bool,
+    cursor_visible: &mut bool,
 ) {
-    let new_seconds_since_start = current_frame_start.duration_since(start).as_secs();
-    if new_seconds_since_start > *seconds_since_start {
-        log!(*LOG_RENDER, "FPS: {}", frame_counter);
-        log!(
-            *LOG_RENDER,
-            "  Avg. Mesh Time: {:?}",
-            mesh_times.iter().sum::<Duration>() / mesh_times.len().max(1) as u32
-        );
-        *frame_counter = 0;
-        *seconds_since_start = new_seconds_since_start;
-    }
+    *focused = new_focus;
+    *grabbed = new_focus;
+    *cursor_visible = !new_focus;
+    window
+        .set_cursor_grab(new_focus)
+        .expect("Cursor lock failed");
+    window.set_cursor_visible(!new_focus);
 }

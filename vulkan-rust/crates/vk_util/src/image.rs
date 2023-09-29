@@ -3,6 +3,7 @@ use crate::{
     device::memory::get_memory_type_index,
 };
 use anyhow::{anyhow, Result};
+use logging::{log, LOG_VULKAN};
 use png::OutputInfo;
 use std::ptr::copy_nonoverlapping as memcpy;
 use vulkanalia::prelude::v1_0::*;
@@ -15,9 +16,11 @@ pub unsafe fn create_texture_image(
 ) -> Result<()> {
     let (info, pixels) = image;
 
-    println!(
-        "Creating Image on GPU: {}x{}, {:?}",
-        info.width, info.height, pixels
+    log!(
+        *LOG_VULKAN,
+        "Creating Image on GPU: {}x{} px",
+        info.width,
+        info.height
     );
 
     let size = info.buffer_size() as u64;
@@ -209,6 +212,7 @@ pub unsafe fn transition_image_layout(
             vk::Format::D32_SFLOAT_S8_UINT | vk::Format::D24_UNORM_S8_UINT => {
                 vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL
             }
+            vk::Format::D32_SFLOAT => vk::ImageAspectFlags::DEPTH,
             _ => vk::ImageAspectFlags::COLOR,
         }
     } else {

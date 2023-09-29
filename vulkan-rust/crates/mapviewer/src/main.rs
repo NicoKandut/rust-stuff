@@ -2,7 +2,7 @@
 
 use png::{BitDepth::Eight, ColorType::RGBA};
 use rand::{thread_rng, Rng};
-use std::{fs::File, io};
+use std::io;
 
 const CLOSED: [u8; SAMPLES] = [255, 0, 0, 255];
 const OPEN: [u8; SAMPLES] = [0, 255, 0, 255];
