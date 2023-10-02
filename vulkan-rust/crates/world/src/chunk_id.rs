@@ -98,4 +98,13 @@ impl MeshId {
             MeshId::Transparent(_) => true,
         }
     }
+
+    pub fn offset(&self) -> glm::Vec3 {
+        let chunk_id = match self {
+            MeshId::Opaque(x) => x,
+            MeshId::Transparent(x) => x,
+        };
+
+        chunk_id.into()
+    }
 }

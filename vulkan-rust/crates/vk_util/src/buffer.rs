@@ -6,7 +6,10 @@ use crate::{
 use anyhow::Result;
 use graphics::{Mesh, Vertex};
 use std::{mem::size_of, ptr::copy_nonoverlapping as memcpy};
-use vulkanalia::prelude::v1_0::*;
+use vulkanalia::{
+    prelude::v1_0::*,
+    vk::{Buffer, DeviceMemory, PhysicalDevice},
+};
 use world::MeshId;
 
 pub unsafe fn create_vertex_buffer(
@@ -269,4 +272,114 @@ pub unsafe fn create_chunk_index_buffer(
     device.free_memory(staging_buffer_memory, None);
 
     Ok(())
+}
+
+pub unsafe fn create_vertex_buffer_cmd(
+    instance: &Instance,
+    device: &Device,
+    id: MeshId,
+    vertices: &Vec<Vertex>,
+    physical_device: &PhysicalDevice,
+) -> Result<(Buffer, DeviceMemory, Buffer, DeviceMemory)> {
+    let size = (size_of::<Vertex>() * vertices.len()) as u64;
+
+    let (staging_buffer, staging_buffer_memory) = create_buffer2(
+        instance,
+        device,
+        physical_device,
+        size,
+        vk::BufferUsageFlags::TRANSFER_SRC,
+        vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+    )?;
+
+    let memory = device.map_memory(staging_buffer_memory, 0, size, vk::MemoryMapFlags::empty())?;
+
+    memcpy(vertices.as_ptr(), memory.cast(), vertices.len());
+
+    device.unmap_memory(staging_buffer_memory);
+
+    let (vertex_buffer, vertex_buffer_memory) = create_buffer2(
+        instance,
+        device,
+        physical_device,
+        size,
+        vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
+        vk::MemoryPropertyFlags::DEVICE_LOCAL,
+    )?;
+
+    Ok((
+        staging_buffer,
+        staging_buffer_memory,
+        vertex_buffer,
+        vertex_buffer_memory,
+    ))
+}
+
+pub unsafe fn create_typed_buffer_cmd<T>(
+    instance: &Instance,
+    device: &Device,
+    id: MeshId,
+    entries: &[T],
+    physical_device: &PhysicalDevice,
+    usage_flags: vk::BufferUsageFlags,
+) -> Result<(Buffer, DeviceMemory, Buffer, DeviceMemory)> {
+    let size = (size_of::<T>() * entries.len()) as u64;
+
+    let (staging_buffer, staging_buffer_memory) = create_buffer2(
+        instance,
+        device,
+        physical_device,
+        size,
+        vk::BufferUsageFlags::TRANSFER_SRC,
+        vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+    )?;
+
+    let memory = device.map_memory(staging_buffer_memory, 0, size, vk::MemoryMapFlags::empty())?;
+
+    memcpy(entries.as_ptr(), memory.cast(), entries.len());
+
+    device.unmap_memory(staging_buffer_memory);
+
+    let (buffer, buffer_memory) = create_buffer2(
+        instance,
+        device,
+        physical_device,
+        size,
+        vk::BufferUsageFlags::TRANSFER_DST | usage_flags,
+        vk::MemoryPropertyFlags::DEVICE_LOCAL,
+    )?;
+
+    Ok((staging_buffer, staging_buffer_memory, buffer, buffer_memory))
+}
+
+unsafe fn create_buffer2(
+    instance: &Instance,
+    device: &Device,
+    physical_device: &PhysicalDevice,
+    size: vk::DeviceSize,
+    usage: vk::BufferUsageFlags,
+    properties: vk::MemoryPropertyFlags,
+) -> Result<(vk::Buffer, vk::DeviceMemory)> {
+    // println!("{LOG_VK} Creating buffer");
+    let buffer_info = vk::BufferCreateInfo::builder()
+        .size(size)
+        .usage(usage)
+        .sharing_mode(vk::SharingMode::EXCLUSIVE);
+
+    let buffer = device.create_buffer(&buffer_info, None)?;
+
+    let requirements = device.get_buffer_memory_requirements(buffer);
+
+    let memory_type_index =
+        get_memory_type_index(instance, physical_device, properties, requirements)?;
+
+    let memory_info = vk::MemoryAllocateInfo::builder()
+        .allocation_size(requirements.size)
+        .memory_type_index(memory_type_index);
+
+    let buffer_memory = device.allocate_memory(&memory_info, None)?;
+
+    device.bind_buffer_memory(buffer, buffer_memory, 0)?;
+
+    Ok((buffer, buffer_memory))
 }

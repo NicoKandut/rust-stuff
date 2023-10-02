@@ -27,3 +27,11 @@ impl AABB {
         (&self.min, &self.max)
     }
 }
+
+impl PartialEq for AABB {
+    fn eq(&self, other: &Self) -> bool {
+        self.min == other.min && self.max == other.max
+    }
+}
+
+impl Eq for AABB {}

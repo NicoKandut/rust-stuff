@@ -14,7 +14,7 @@ use crate::{
     pipeline::create_pipeline,
     renderpass::create_render_pass,
     swapchain::{create_swapchain, create_swapchain_image_views},
-    uinform::{create_descriptor_set_layout, create_uniform_buffers, UniformBufferObject},
+    uniform::{create_descriptor_set_layout, create_uniform_buffers, UniformBufferObject},
 };
 use anyhow::{anyhow, Context, Result};
 use geometry::AABB;
@@ -30,8 +30,8 @@ use vulkanalia::{
     loader::{LibloadingLoader, LIBRARY},
     prelude::v1_0::*,
     vk::ExtDebugUtilsExtension,
-    vk::KhrSurfaceExtension,
     vk::KhrSwapchainExtension,
+    vk::{CommandBuffer, KhrSurfaceExtension},
     window as vk_window,
 };
 use winit::window::Window;
@@ -225,7 +225,7 @@ impl App {
         );
 
         let (view, proj) = vp;
-        let frustum = Frustum::from_mat4(&(proj * view));
+        let frustum = Frustum::from_mat4(proj * view);
 
         let secondary_command_buffers = meshes
             .iter()

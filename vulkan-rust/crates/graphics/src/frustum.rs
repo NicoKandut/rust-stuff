@@ -7,7 +7,7 @@ pub struct Frustum {
 }
 
 impl Frustum {
-    pub fn from_mat4(mat: &glm::Mat4) -> Self {
+    pub fn from_mat4(mat: glm::Mat4) -> Self {
         let mat = mat.transpose();
         let planes = [
             mat.column(3) + mat.column(0), // left

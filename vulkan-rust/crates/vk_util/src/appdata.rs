@@ -1,12 +1,12 @@
 use crate::{
     constants::{LOG_VK, MAX_FRAMES_IN_FLIGHT},
-    uinform::UniformBufferObject,
+    uniform::UniformBufferObject,
 };
 use anyhow::Result;
 use graphics::Vertex;
 use std::{collections::HashMap, mem::size_of};
 use vulkanalia::prelude::v1_0::*;
-use world::{ChunkId, MeshId};
+use world::MeshId;
 
 /// The Vulkan handles and associated properties used by our Vulkan app.
 #[derive(Clone, Debug, Default)]
