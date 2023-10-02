@@ -21,7 +21,12 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
-use vk_util::{app::App, buffer::create_chunk_buffers};
+use vk_util::{
+    app::App,
+    buffer::{
+        create_chunk_buffers, prepare_buffer, prepare_mesh, prepare_vertex_buffer, PreparedMesh,
+    },
+};
 use winit::{
     dpi::{LogicalSize, PhysicalPosition},
     event::{
@@ -42,8 +47,8 @@ mod world_thread;
 #[derive(Clone)]
 struct ChunkUpdate(ChunkId, ChunkData, Instant);
 
-const INITIAL_LOAD_DISTANCE: f32 = CHUNK_SIZE_F * 5.0;
-const INITIAL_UNLOAD_DISTANCE: f32 = CHUNK_SIZE_F * 6.0;
+const INITIAL_LOAD_DISTANCE: f32 = CHUNK_SIZE_F * 1.0;
+const INITIAL_UNLOAD_DISTANCE: f32 = CHUNK_SIZE_F * 2.0;
 const PLAYER_BUILDING_REACH: f32 = 10.0;
 const STAT_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -119,6 +124,9 @@ impl Engine {
         let mut last_sent_position = glm::vec3(-100000.0, 100000.0, 100000.0);
         let mut last_sent_time = start;
 
+        // TODO: can be local variable
+        let mut prepared_meshes = Vec::new();
+
         // let mut dur_between_frames = Duration::default();
         // let mut dur_cam_update = Duration::default();
         // let mut dur_world_send = Duration::default();
@@ -156,12 +164,25 @@ impl Engine {
                 // dur_delete += now.elapsed();
 
                 // let now: Instant = Instant::now();
-                self.receive_mesh_events(&world_events, &mut app, &current_frame_start);
+                self.receive_mesh_events(
+                    &world_events,
+                    &mut app,
+                    &current_frame_start,
+                    &mut prepared_meshes,
+                );
                 // dur_receive += now.elapsed();
 
                 // render
                 // let now: Instant = Instant::now();
-                unsafe { app.render(&window, &self.meshes, &self.camera) }.unwrap();
+                unsafe {
+                    app.render(
+                        &window,
+                        &mut self.meshes,
+                        &self.camera,
+                        &mut prepared_meshes,
+                    )
+                }
+                .unwrap();
                 // dur_render += now.elapsed();
 
                 // End frame
@@ -321,6 +342,7 @@ impl Engine {
         world_events: &mpsc::Receiver<MeshEvent>,
         app: &mut App,
         current_frame_start: &Instant,
+        prepared_meshes: &mut Vec<(MeshId, PreparedMesh)>,
     ) {
         const ALLOWED_FRAME_TIME: Duration = Duration::from_millis(1);
 
@@ -328,32 +350,17 @@ impl Engine {
             match mesh_event {
                 MeshEvent::Add(id, (opaque_mesh, transparent_mesh)) => {
                     if let Some(mesh) = opaque_mesh {
-                        let mesh_id = MeshId::Opaque(id);
-                        self.meshes.insert(mesh_id, mesh.indices.len());
-                        unsafe {
-                            create_chunk_buffers(
-                                &app.instance,
-                                &app.device,
-                                mesh_id,
-                                mesh,
-                                &mut app.data,
-                            )
-                            .expect("Opaque chunk buffers must be created.");
-                        };
+                        let prepared_mesh =
+                            prepare_mesh(&app.instance, &app.device, &mesh, &mut app.data);
+                        prepared_meshes.push((MeshId::Opaque(id), prepared_mesh));
+
+                        // self.meshes.insert(mesh_id, mesh.indices.len()); // TODO: move to later
                     }
                     if let Some(mesh) = transparent_mesh {
-                        let mesh_id = MeshId::Transparent(id);
-                        self.meshes.insert(mesh_id, mesh.indices.len());
-                        unsafe {
-                            create_chunk_buffers(
-                                &app.instance,
-                                &app.device,
-                                mesh_id,
-                                mesh,
-                                &mut app.data,
-                            )
-                            .expect("Opaque chunk buffers must be created.");
-                        };
+                        let prepared_mesh =
+                            prepare_mesh(&app.instance, &app.device, &mesh, &mut app.data);
+                        prepared_meshes.push((MeshId::Transparent(id), prepared_mesh));
+                        // self.meshes.insert(mesh_id, mesh.indices.len()); // TODO: move to later
                     }
                 }
                 MeshEvent::Remove(id) => {

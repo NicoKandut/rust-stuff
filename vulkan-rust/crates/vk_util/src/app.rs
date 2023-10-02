@@ -3,6 +3,7 @@ use crate::{
         create_descriptor_pool, create_descriptor_sets, create_framebuffers, create_sync_objects,
         AppData,
     },
+    buffer::PreparedMesh,
     command::{create_command_buffers, create_command_pools},
     constants::{MAX_FRAMES_IN_FLIGHT, VALIDATION_ENABLED},
     device::pick_device,
@@ -102,8 +103,9 @@ impl App {
     pub unsafe fn render(
         &mut self,
         window: &Window,
-        meshes: &BTreeMap<MeshId, usize>,
+        meshes: &mut BTreeMap<MeshId, usize>,
         cam: &FlyingCamera,
+        prepared_meshes: &mut Vec<(MeshId, PreparedMesh)>,
     ) -> Result<()> {
         let in_flight_fence = self.data.in_flight_fences[self.frame];
 
@@ -135,12 +137,15 @@ impl App {
 
         let vp = self.calculate_vp(cam);
 
-        self.update_command_buffer(image_index, meshes, &vp)?;
+        self.update_command_buffer(image_index, meshes, &vp, prepared_meshes)?;
         self.update_uniform_buffer(image_index, vp, glm::vec3_to_vec4(&cam.cam.position))?;
 
         let wait_semaphores = &[self.data.image_available_semaphores[self.frame]];
         let wait_stages = &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let command_buffers = &[self.data.command_buffers[image_index]];
+        let command_buffers = &[
+            self.data.command_buffers_transfer[image_index],
+            self.data.command_buffers[image_index],
+        ];
         let signal_semaphores = &[self.data.render_finished_semaphores[self.frame]];
         let submit_info = vk::SubmitInfo::builder()
             .wait_semaphores(wait_semaphores)
@@ -149,7 +154,6 @@ impl App {
             .signal_semaphores(signal_semaphores);
 
         self.device.reset_fences(&[in_flight_fence])?;
-
         self.device
             .queue_submit(self.data.graphics_queue, &[submit_info], in_flight_fence)?;
 
@@ -180,20 +184,48 @@ impl App {
     unsafe fn update_command_buffer(
         &mut self,
         image_index: usize,
-        meshes: &BTreeMap<MeshId, usize>,
+        meshes: &mut BTreeMap<MeshId, usize>,
         vp: &(glm::Mat4, glm::Mat4),
+        prepared_meshes: &mut Vec<(MeshId, PreparedMesh)>,
     ) -> Result<()> {
         // println!("{LOG_VK} UPDATING ALL CMD BUFFERS");
         let command_pool = self.data.command_pools[image_index];
         self.device
             .reset_command_pool(command_pool, vk::CommandPoolResetFlags::empty())?;
 
-        let command_buffer = self.data.command_buffers[image_index];
-
+        // NEW MESHES
+        let command_buffer = self.data.command_buffers_transfer[image_index];
         let info = vk::CommandBufferBeginInfo::builder();
-
         self.device.begin_command_buffer(command_buffer, &info)?;
+        let new_meshes = prepared_meshes
+            .drain(..)
+            .map(|(mesh_id, prepared_mesh)| {
+                let regions = vk::BufferCopy::builder().size(prepared_mesh.vertex.size);
+                println!("Adding copy commands for mesh");
+                self.device.cmd_copy_buffer(
+                    command_buffer,
+                    prepared_mesh.vertex.staging.buffer,
+                    prepared_mesh.vertex.target.buffer,
+                    &[regions],
+                );
 
+                let regions = vk::BufferCopy::builder().size(prepared_mesh.index.size);
+                self.device.cmd_copy_buffer(
+                    command_buffer,
+                    prepared_mesh.index.staging.buffer,
+                    prepared_mesh.index.target.buffer,
+                    &[regions],
+                );
+
+                (mesh_id, prepared_mesh)
+            })
+            .collect::<Vec<_>>();
+        self.device.end_command_buffer(command_buffer)?;
+
+        // RENDER
+        let command_buffer = self.data.command_buffers[image_index];
+        let info = vk::CommandBufferBeginInfo::builder();
+        self.device.begin_command_buffer(command_buffer, &info)?;
         let render_area = vk::Rect2D::builder()
             .offset(vk::Offset2D::default())
             .extent(self.data.swapchain_extent);
@@ -224,9 +256,10 @@ impl App {
             vk::SubpassContents::SECONDARY_COMMAND_BUFFERS,
         );
 
+        // EXISTING CHUNKS
+        // println!("Rendering {} meshes", meshes.len());
         let (view, proj) = vp;
         let frustum = Frustum::from_mat4(&(proj * view));
-
         let secondary_command_buffers = meshes
             .iter()
             .filter(|(id, ..)| frustum.intersects_aabb(&AABB::from(id.chunk_id())))
@@ -234,7 +267,7 @@ impl App {
                 match self.update_secondary_command_buffer(image_index, id, *index_count) {
                     Ok(cmd_buffer) => Some(cmd_buffer),
                     Err(_) => {
-                        println!("Failed to update cmd buffer");
+                        // println!("Failed to update cmd buffer");
                         None
                     }
                 }
@@ -247,12 +280,59 @@ impl App {
         }
 
         self.device.cmd_end_render_pass(command_buffer);
-
         self.device.end_command_buffer(command_buffer)?;
+
+        if !new_meshes.is_empty() {
+            println!("{} new meshes", new_meshes.len());
+        }
+
+        for (mesh_id, prepared_mesh) in new_meshes {
+            self.register_mesh_ready(mesh_id, &prepared_mesh);
+            meshes.insert(
+                mesh_id,
+                prepared_mesh.index.size as usize / size_of::<u32>(),
+            );
+        }
 
         // println!("{LOG_VK} DONE UPDATING ALL CMD BUFFERS");
 
         Ok(())
+    }
+
+    fn register_mesh_ready(&mut self, mesh_id: MeshId, prepared_mesh: &PreparedMesh) {
+        let prev_buffer = self
+            .data
+            .chunk_vertex_buffers
+            .insert(mesh_id, prepared_mesh.vertex.target.buffer);
+        if let Some(b) = prev_buffer {
+            // TODO: is destroying correct?
+            // unsafe { self.device.destroy_buffer(b, None) };
+        }
+        let prev_memory = self
+            .data
+            .chunk_vertex_buffers_memory
+            .insert(mesh_id, prepared_mesh.vertex.target.memory);
+        if let Some(m) = prev_memory {
+            // TODO: is freeing correct?
+            // unsafe { self.device.free_memory(m, None) };
+        }
+
+        let prev_buffer = self
+            .data
+            .chunk_index_buffer
+            .insert(mesh_id, prepared_mesh.index.target.buffer);
+        if let Some(b) = prev_buffer {
+            // TODO: is destroying correct?
+            // unsafe { self.device.destroy_buffer(b, None) };
+        }
+        let prev_memory = self
+            .data
+            .chunk_vertex_buffers_memory
+            .insert(mesh_id, prepared_mesh.index.target.memory);
+        if let Some(m) = prev_memory {
+            // TODO: is freeing correct?
+            // unsafe { self.device.free_memory(m, None) };
+        }
     }
 
     unsafe fn update_secondary_command_buffer(
@@ -275,14 +355,8 @@ impl App {
             command_buffers.insert(*id, command_buffer);
         }
 
-        let cmd_buffer = *command_buffers
-            .get(id)
-            .context("Cannot use command buffer")?;
-        let vertex_buffer = *self
-            .data
-            .chunk_vertex_buffers
-            .get(id)
-            .context("Cannot use vertex buffer")?;
+        let cmd_buffer = command_buffers[id];
+        let vertex_buffer = self.data.chunk_vertex_buffers[id];
 
         let start = WorldPosition::from(id.chunk_id());
         let x = start.x as f32;

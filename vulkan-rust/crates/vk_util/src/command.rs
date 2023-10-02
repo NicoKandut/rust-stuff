@@ -38,10 +38,11 @@ pub unsafe fn create_command_buffers(device: &Device, data: &mut AppData) -> Res
         let allocate_info = vk::CommandBufferAllocateInfo::builder()
             .command_pool(data.command_pools[image_index])
             .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(1);
+            .command_buffer_count(2);
 
-        let command_buffer = device.allocate_command_buffers(&allocate_info)?[0];
-        data.command_buffers.push(command_buffer);
+        let command_buffers = device.allocate_command_buffers(&allocate_info)?;
+        data.command_buffers_transfer.push(command_buffers[0]);
+        data.command_buffers.push(command_buffers[1]);
     }
 
     data.secondary_command_buffers = [Default::default(), Default::default(), Default::default()];

@@ -6,7 +6,10 @@ use crate::{
 use anyhow::Result;
 use graphics::{Mesh, Vertex};
 use std::{mem::size_of, ptr::copy_nonoverlapping as memcpy};
-use vulkanalia::prelude::v1_0::*;
+use vulkanalia::{
+    prelude::v1_0::*,
+    vk::{Buffer, DeviceMemory},
+};
 use world::MeshId;
 
 pub unsafe fn create_vertex_buffer(
@@ -269,4 +272,120 @@ pub unsafe fn create_chunk_index_buffer(
     device.free_memory(staging_buffer_memory, None);
 
     Ok(())
+}
+
+pub struct BufferWithMemory {
+    pub buffer: Buffer,
+    pub memory: DeviceMemory,
+}
+
+pub struct PreparedBuffer {
+    pub staging: BufferWithMemory,
+    pub target: BufferWithMemory,
+    pub size: u64,
+}
+
+pub struct PreparedMesh {
+    pub vertex: PreparedBuffer,
+    pub index: PreparedBuffer,
+}
+
+pub fn prepare_mesh(
+    instance: &Instance,
+    device: &Device,
+    mesh: &Mesh,
+    data: &mut AppData,
+) -> PreparedMesh {
+    PreparedMesh {
+        vertex: prepare_vertex_buffer(instance, device, &mesh.vertices, data),
+        index: prepare_index_buffer(instance, device, &mesh.indices, data),
+    }
+}
+
+pub fn prepare_vertex_buffer(
+    instance: &Instance,
+    device: &Device,
+    items: &[Vertex],
+    data: &mut AppData,
+) -> PreparedBuffer {
+    unsafe {
+        prepare_buffer(
+            instance,
+            device,
+            items,
+            data,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+        )
+        .expect("failed to prepare vertex buffer")
+    }
+}
+
+pub fn prepare_index_buffer(
+    instance: &Instance,
+    device: &Device,
+    items: &[u32],
+    data: &mut AppData,
+) -> PreparedBuffer {
+    unsafe {
+        prepare_buffer(
+            instance,
+            device,
+            items,
+            data,
+            vk::BufferUsageFlags::INDEX_BUFFER,
+        )
+        .expect("failed to prepare index buffer")
+    }
+}
+
+pub unsafe fn prepare_buffer<T>(
+    instance: &Instance,
+    device: &Device,
+    items: &[T],
+    data: &mut AppData,
+    usage: vk::BufferUsageFlags,
+) -> Result<PreparedBuffer> {
+    let item_count = items.len();
+    let buffer_size = (size_of::<T>() * item_count) as u64;
+
+    let (staging_buffer, staging_buffer_memory) = create_buffer(
+        instance,
+        device,
+        data,
+        buffer_size,
+        vk::BufferUsageFlags::TRANSFER_SRC,
+        vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
+    )?;
+
+    let memory = device.map_memory(
+        staging_buffer_memory,
+        0,
+        buffer_size,
+        vk::MemoryMapFlags::empty(),
+    )?;
+
+    memcpy(items.as_ptr(), memory.cast(), item_count);
+
+    device.unmap_memory(staging_buffer_memory);
+
+    let (target_buffer, target_buffer_memory) = create_buffer(
+        instance,
+        device,
+        data,
+        buffer_size,
+        vk::BufferUsageFlags::TRANSFER_DST | usage,
+        vk::MemoryPropertyFlags::DEVICE_LOCAL,
+    )?;
+
+    Ok(PreparedBuffer {
+        size: buffer_size,
+        staging: BufferWithMemory {
+            buffer: staging_buffer,
+            memory: staging_buffer_memory,
+        },
+        target: BufferWithMemory {
+            buffer: target_buffer,
+            memory: target_buffer_memory,
+        },
+    })
 }

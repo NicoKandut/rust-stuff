@@ -6,7 +6,7 @@ use anyhow::Result;
 use graphics::Vertex;
 use std::{collections::HashMap, mem::size_of};
 use vulkanalia::prelude::v1_0::*;
-use world::{ChunkId, MeshId};
+use world::MeshId;
 
 /// The Vulkan handles and associated properties used by our Vulkan app.
 #[derive(Clone, Debug, Default)]
@@ -29,6 +29,7 @@ pub struct AppData {
     pub command_pool: vk::CommandPool,
     pub command_pools: Vec<vk::CommandPool>,
     pub command_buffers: Vec<vk::CommandBuffer>,
+    pub command_buffers_transfer: Vec<vk::CommandBuffer>,
     pub secondary_command_buffers: [HashMap<MeshId, vk::CommandBuffer>; MAX_FRAMES_IN_FLIGHT + 1],
     pub image_available_semaphores: Vec<vk::Semaphore>,
     pub render_finished_semaphores: Vec<vk::Semaphore>,
