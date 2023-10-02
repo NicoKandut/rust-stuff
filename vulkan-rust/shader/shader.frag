@@ -27,8 +27,12 @@ void main() {
     vec4 fog_weight = vec4(1,2,4,1);
     vec4 lambda = exp(-0.0005 * fog_weight * fragDistance);
 
-    outColor = lambda * illuminated_color + (1-lambda) * fog_background;
+    // FINAL
+    outColor = mix(fog_background, illuminated_color, lambda);
     // outColor = material_color;
     // outColor = illuminated_color;
     // outColor = vec4(fragNormal, 1.0);
+    // vec4 depth = textureLod(depth, gl_FragCoord.xy + 0.5, 0);
+    // outColor = depth;
+    // outColor = vec4(gl_FragCoord.xyz / 400, clamp(gl_FragCoord.w * 100, 0, 1));
 }

@@ -13,7 +13,7 @@ use std::{
 use threadpool::ThreadPool;
 use world::{
     gen::chunk::{compress, Chunk},
-    mesh_generator::generate_greedy_mesh,
+    mesh_generator::{generate_greedy_mesh, generate_greedy_mesh_water},
     slice::CubeSlice,
     traits::{Data3D, Generate, Voxelize},
     ChunkId, ChunkSeed, Raycast, World, WorldPosition, WorldSeed, CHUNK_SIZE, CHUNK_SIZE_I,
@@ -39,7 +39,7 @@ pub(crate) enum Request {
 }
 
 pub(crate) enum MeshEvent {
-    Add(ChunkId, Mesh),
+    Add(ChunkId, (Option<Mesh>, Option<Mesh>)),
     Remove(ChunkId),
 }
 
@@ -55,7 +55,7 @@ pub(crate) fn spawn() -> (
         .spawn(move || {
             log!(*LOG_WORLD, "World Thread started");
 
-            let seed = WorldSeed::random();
+            let seed = WorldSeed::new(17);
             let mut world = World::new(seed.clone());
             let mut dirty_chunks = HashSet::default();
             let mut overflow = Vec::new();
@@ -184,18 +184,7 @@ fn mesh_dirty_chunks(
     dirty_chunks
         .par_drain()
         .filter_map(|id| match world.chunk_manager.get(&id) {
-            Some(data) => {
-                if data.needs_mesh() {
-                    let mesh = remesh(&id, &world);
-                    if mesh.vertices.is_empty() {
-                        log!(*LOG_WORLD, "[WARN] Empty mesh produced for {:?}", id);
-                    } else {
-                        return Some(MeshEvent::Add(id, mesh));
-                    }
-                }
-
-                None
-            }
+            Some(_) => Some(MeshEvent::Add(id, remesh(&id, &world))),
             None => Some(MeshEvent::Remove(id)),
         })
         .collect::<Vec<_>>()
@@ -264,16 +253,21 @@ fn process_chunk_actions(
     )
 }
 
-fn remesh(id: &ChunkId, world: &World) -> Mesh {
+fn remesh(id: &ChunkId, world: &World) -> (Option<Mesh>, Option<Mesh>) {
     if let Some(chunk_data) = world.chunk_manager.get(id) {
         // read old data
         let mut blocks = CubeSlice::<Material, CHUNK_SIZE_SAFE>::default();
+        let mut contains_opaque_blocks = false;
+        let mut contains_invisible_blocks = false;
 
         // center chunk
         for x in 0..CHUNK_SIZE {
             for y in 0..CHUNK_SIZE {
                 for z in 0..CHUNK_SIZE {
-                    blocks.set(x + 1, y + 1, z + 1, chunk_data.get(x, y, z));
+                    let material = chunk_data.get(x, y, z);
+                    blocks.set(x + 1, y + 1, z + 1, material);
+                    contains_opaque_blocks |= material.is_opaque();
+                    contains_invisible_blocks |= !material.is_opaque();
                 }
             }
         }
@@ -281,57 +275,103 @@ fn remesh(id: &ChunkId, world: &World) -> Mesh {
         let adjecent = id.get_adjecent();
 
         // x
-        if let Some(adjecent) = world.chunk_manager.get(&adjecent[0]) {
-            for y in 0..CHUNK_SIZE {
-                for z in 0..CHUNK_SIZE {
-                    blocks.set(0, y + 1, z + 1, adjecent.get(CHUNK_SIZE - 1, y, z));
-                }
-            }
-        }
+        // if let Some(adjecent) = world.chunk_manager.get(&adjecent[0]) {
+        //     for y in 0..CHUNK_SIZE {
+        //         for z in 0..CHUNK_SIZE {
+        //             let material = adjecent.get(CHUNK_SIZE - 1, y, z);
+        //             blocks.set(0, y + 1, z + 1, material);
+        //             contains_opaque_blocks |= material.is_opaque();
+        //             contains_invisible_blocks |= !material.is_opaque();
+        //         }
+        //     }
+        // }
         if let Some(adjecent) = world.chunk_manager.get(&adjecent[1]) {
             for y in 0..CHUNK_SIZE {
                 for z in 0..CHUNK_SIZE {
-                    blocks.set(CHUNK_SIZE_SAFE - 1, y + 1, z + 1, adjecent.get(0, y, z));
+                    let material = adjecent.get(0, y, z);
+                    blocks.set(CHUNK_SIZE_SAFE - 1, y + 1, z + 1, material);
+                    contains_opaque_blocks |= material.is_opaque();
+                    contains_invisible_blocks |= !material.is_opaque();
                 }
             }
         }
 
         // y
-        if let Some(adjecent) = world.chunk_manager.get(&adjecent[2]) {
-            for x in 0..CHUNK_SIZE {
-                for z in 0..CHUNK_SIZE {
-                    blocks.set(x + 1, 0, z + 1, adjecent.get(x, CHUNK_SIZE - 1, z));
-                }
-            }
-        }
+        // if let Some(adjecent) = world.chunk_manager.get(&adjecent[2]) {
+        //     for x in 0..CHUNK_SIZE {
+        //         for z in 0..CHUNK_SIZE {
+        //             let material = adjecent.get(x, CHUNK_SIZE - 1, z);
+        //             blocks.set(x + 1, 0, z + 1, material);
+        //             contains_opaque_blocks |= material.is_opaque();
+        //             contains_invisible_blocks |= !material.is_opaque();
+        //         }
+        //     }
+        // }
         if let Some(adjecent) = world.chunk_manager.get(&adjecent[3]) {
             for x in 0..CHUNK_SIZE {
                 for z in 0..CHUNK_SIZE {
-                    blocks.set(x + 1, CHUNK_SIZE_SAFE - 1, z + 1, adjecent.get(x, 0, z));
+                    let material = adjecent.get(x, 0, z);
+                    blocks.set(x + 1, CHUNK_SIZE_SAFE - 1, z + 1, material);
+                    contains_opaque_blocks |= material.is_opaque();
+                    contains_invisible_blocks |= !material.is_opaque();
                 }
             }
         }
 
         // x
-        if let Some(adjecent) = world.chunk_manager.get(&adjecent[4]) {
-            for x in 0..CHUNK_SIZE {
-                for y in 0..CHUNK_SIZE {
-                    blocks.set(x + 1, y + 1, 0, adjecent.get(x, y, CHUNK_SIZE - 1));
-                }
-            }
-        }
+        // if let Some(adjecent) = world.chunk_manager.get(&adjecent[4]) {
+        //     for x in 0..CHUNK_SIZE {
+        //         for y in 0..CHUNK_SIZE {
+        //             let material = adjecent.get(x, y, CHUNK_SIZE - 1);
+        //             blocks.set(x + 1, y + 1, 0, material);
+        //             contains_opaque_blocks |= material.is_opaque();
+        //             contains_invisible_blocks |= !material.is_opaque();
+        //         }
+        //     }
+        // }
         if let Some(adjecent) = world.chunk_manager.get(&adjecent[5]) {
             for x in 0..CHUNK_SIZE {
                 for y in 0..CHUNK_SIZE {
-                    blocks.set(x + 1, y + 1, CHUNK_SIZE_SAFE - 1, adjecent.get(x, y, 0));
+                    let material = adjecent.get(x, y, 0);
+                    blocks.set(x + 1, y + 1, CHUNK_SIZE_SAFE - 1, material);
+                    contains_opaque_blocks |= material.is_opaque();
+                    contains_invisible_blocks |= !material.is_opaque();
                 }
             }
         }
 
+        if contains_opaque_blocks && !contains_invisible_blocks {
+            // println!("No mesh for full chunk");
+            return (None, None);
+        }
+
+        if !contains_opaque_blocks && contains_invisible_blocks {
+            // println!("No mesh for empty chunk");
+            return (None, None);
+        }
+
         // remesh
-        generate_greedy_mesh(id, &blocks)
+        let mesh = generate_greedy_mesh(id, &blocks);
+        let opaque_mesh = if mesh.vertices.is_empty() {
+            None
+        } else {
+            Some(mesh)
+        };
+
+        let mesh = generate_greedy_mesh_water(id, &blocks);
+        let water_mesh = if mesh.vertices.is_empty() {
+            None
+        } else {
+            Some(mesh)
+        };
+
+        if opaque_mesh.is_none() && water_mesh.is_none() {
+            log!(*LOG_WORLD, "[WARN] Empty mesh produced for {:?}", id);
+        }
+
+        (opaque_mesh, water_mesh)
     } else {
         println!("WARN: attempted to mesh non-exitent chunk");
-        Mesh::default()
+        (None, None)
     }
 }

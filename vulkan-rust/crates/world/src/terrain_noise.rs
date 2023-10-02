@@ -16,17 +16,27 @@ pub fn height(seed: &WorldSeed, offset_x: i32, offset_y: i32, size: usize) -> Ve
     let x = offset_x as f32 + seed_offset_x as f32;
     let y = offset_y as f32 + seed_offset_y as f32;
 
-    let (mut noise, _min, _max) = NoiseBuilder::fbm_2d_offset(x as f32, size, y as f32, size)
+    let (base_height, _min, _max) = NoiseBuilder::gradient_2d_offset(x, size, y, size)
         .with_seed(noise_id::HEIGHT + i32::from(seed))
-        .with_freq(0.17)
-        .with_octaves(11)
-        .with_gain(2.0)
-        .with_lacunarity(0.5)
+        .with_freq(0.000017)
+        // .with_octaves(11)
+        // .with_gain(1.0)
+        // .with_lacunarity(2.0)
         .generate();
 
-    noise.iter_mut().for_each(|x| *x *= 10.0);
+    let (variation, _min, _max) = NoiseBuilder::fbm_2d_offset(x as f32, size, y as f32, size)
+        .with_seed(noise_id::HEIGHT + i32::from(seed))
+        .with_freq(0.000003)
+        .with_octaves(14)
+        .with_gain(1.0)
+        .with_lacunarity(2.0)
+        .generate();
 
-    noise
+    base_height
+        .into_iter()
+        .zip(variation.into_iter())
+        .map(|(base_height, variation)| (base_height * 12000.0) + variation * 100.0)
+        .collect()
 }
 
 pub fn chunk_temperature(seed: &WorldSeed, position: &WorldPosition) -> Vec<f32> {

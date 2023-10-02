@@ -4,9 +4,9 @@ use crate::{
 };
 use anyhow::Result;
 use graphics::Vertex;
-use std::{collections::BTreeMap, mem::size_of};
+use std::{collections::HashMap, mem::size_of};
 use vulkanalia::prelude::v1_0::*;
-use world::ChunkId;
+use world::{ChunkId, MeshId};
 
 /// The Vulkan handles and associated properties used by our Vulkan app.
 #[derive(Clone, Debug, Default)]
@@ -29,21 +29,25 @@ pub struct AppData {
     pub command_pool: vk::CommandPool,
     pub command_pools: Vec<vk::CommandPool>,
     pub command_buffers: Vec<vk::CommandBuffer>,
-    pub secondary_command_buffers: [BTreeMap<ChunkId, vk::CommandBuffer>; MAX_FRAMES_IN_FLIGHT + 1],
+    pub secondary_command_buffers: [HashMap<MeshId, vk::CommandBuffer>; MAX_FRAMES_IN_FLIGHT + 1],
     pub image_available_semaphores: Vec<vk::Semaphore>,
     pub render_finished_semaphores: Vec<vk::Semaphore>,
     pub in_flight_fences: Vec<vk::Fence>,
     pub images_in_flight: Vec<vk::Fence>,
+
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
     pub vertex_buffer: vk::Buffer,
     pub vertex_buffer_memory: vk::DeviceMemory,
-    pub chunk_vertex_buffers: BTreeMap<ChunkId, vk::Buffer>,
-    pub chunk_vertex_buffers_memory: BTreeMap<ChunkId, vk::DeviceMemory>,
     pub index_buffer: vk::Buffer,
     pub index_buffer_memory: vk::DeviceMemory,
-    pub chunk_index_buffer: BTreeMap<ChunkId, vk::Buffer>,
-    pub chunk_index_buffer_memory: BTreeMap<ChunkId, vk::DeviceMemory>,
+
+    // CHUNKS
+    pub chunk_vertex_buffers: HashMap<MeshId, vk::Buffer>,
+    pub chunk_vertex_buffers_memory: HashMap<MeshId, vk::DeviceMemory>,
+    pub chunk_index_buffer: HashMap<MeshId, vk::Buffer>,
+    pub chunk_index_buffer_memory: HashMap<MeshId, vk::DeviceMemory>,
+
     pub uniform_buffers: Vec<vk::Buffer>,
     pub uniform_buffers_memory: Vec<vk::DeviceMemory>,
     pub descriptor_pool: vk::DescriptorPool,
@@ -61,8 +65,8 @@ pub unsafe fn create_framebuffers(device: &Device, data: &mut AppData) -> Result
     data.framebuffers = data
         .swapchain_image_views
         .iter()
-        .map(|i| {
-            let attachments = &[*i, data.depth_image_view];
+        .map(|image_view| {
+            let attachments = &[*image_view, data.depth_image_view];
             let create_info = vk::FramebufferCreateInfo::builder()
                 .render_pass(data.render_pass)
                 .attachments(attachments)
@@ -147,14 +151,17 @@ pub unsafe fn create_descriptor_sets(device: &Device, data: &mut AppData) -> Res
             .image_view(data.texture_image_view)
             .sampler(data.texture_sampler);
         let image_info = &[info];
-        let sampler_write = vk::WriteDescriptorSet::builder()
+        let palette_sampler_write = vk::WriteDescriptorSet::builder()
             .dst_set(data.descriptor_sets[i])
             .dst_binding(1)
             .dst_array_element(0)
             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
             .image_info(image_info);
 
-        device.update_descriptor_sets(&[ubo_write, sampler_write], &[] as &[vk::CopyDescriptorSet]);
+        device.update_descriptor_sets(
+            &[ubo_write, palette_sampler_write],
+            &[] as &[vk::CopyDescriptorSet],
+        );
     }
 
     println!("{LOG_VK} Creating descriptor sets");

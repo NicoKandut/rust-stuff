@@ -11,6 +11,7 @@ anyhow = "1"
 winit = "0.24"
 log = "0.4"
 gamedata.workspace = true
+geometry.workspace = true
 world.workspace = true
 graphics.workspace = true
 palette.workspace = true

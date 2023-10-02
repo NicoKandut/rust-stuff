@@ -10,7 +10,7 @@ pub mod mgmt;
 pub mod slice;
 pub mod traits;
 
-pub use chunk_id::ChunkId;
+pub use chunk_id::{ChunkId, MeshId};
 pub use mgmt::chunk::ChunkManager;
 pub use seed::{ChunkSeed, PositionalSeed, WorldSeed};
 pub use world_parameters::*;

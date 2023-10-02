@@ -2981,6 +2981,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "gamedata",
+ "geometry",
  "graphics",
  "log",
  "logging",

@@ -77,3 +77,25 @@ mod tests {
         assert_eq!(ChunkId::from(&position), ChunkId::new(-1, 0, 1));
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum MeshId {
+    Opaque(ChunkId),
+    Transparent(ChunkId),
+}
+
+impl MeshId {
+    pub fn chunk_id(&self) -> &ChunkId {
+        match self {
+            MeshId::Opaque(x) => x,
+            MeshId::Transparent(x) => x,
+        }
+    }
+
+    pub fn is_water(&self) -> bool {
+        match self {
+            MeshId::Opaque(_) => false,
+            MeshId::Transparent(_) => true,
+        }
+    }
+}

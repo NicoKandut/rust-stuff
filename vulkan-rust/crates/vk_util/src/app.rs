@@ -17,9 +17,15 @@ use crate::{
     uinform::{create_descriptor_set_layout, create_uniform_buffers, UniformBufferObject},
 };
 use anyhow::{anyhow, Context, Result};
+use geometry::AABB;
 use graphics::{camera::FlyingCamera, Frustum};
 use resources::prelude::CACHE;
-use std::{collections::HashMap, mem::size_of, ptr::copy_nonoverlapping as memcpy, time::Instant};
+use std::{
+    collections::{BTreeMap, HashMap},
+    mem::size_of,
+    ptr::copy_nonoverlapping as memcpy,
+    time::Instant,
+};
 use vulkanalia::{
     loader::{LibloadingLoader, LIBRARY},
     prelude::v1_0::*,
@@ -29,7 +35,7 @@ use vulkanalia::{
     window as vk_window,
 };
 use winit::window::Window;
-use world::{ChunkId, WorldPosition};
+use world::{MeshId, WorldPosition};
 
 #[derive(Clone, Debug)]
 pub struct App {
@@ -96,7 +102,7 @@ impl App {
     pub unsafe fn render(
         &mut self,
         window: &Window,
-        meshes: &HashMap<ChunkId, usize>,
+        meshes: &BTreeMap<MeshId, usize>,
         cam: &FlyingCamera,
     ) -> Result<()> {
         let in_flight_fence = self.data.in_flight_fences[self.frame];
@@ -174,7 +180,7 @@ impl App {
     unsafe fn update_command_buffer(
         &mut self,
         image_index: usize,
-        meshes: &HashMap<ChunkId, usize>,
+        meshes: &BTreeMap<MeshId, usize>,
         vp: &(glm::Mat4, glm::Mat4),
     ) -> Result<()> {
         // println!("{LOG_VK} UPDATING ALL CMD BUFFERS");
@@ -223,17 +229,14 @@ impl App {
 
         let secondary_command_buffers = meshes
             .iter()
+            .filter(|(id, ..)| frustum.intersects_aabb(&AABB::from(id.chunk_id())))
             .filter_map(|(id, index_count)| {
-                if frustum.intersects_aabb(&id.into()) {
-                    match self.update_secondary_command_buffer(image_index, id, *index_count) {
-                        Ok(cmd_buffer) => Some(cmd_buffer),
-                        Err(_) => {
-                            println!("Failed to update cmd buffer");
-                            None
-                        }
+                match self.update_secondary_command_buffer(image_index, id, *index_count) {
+                    Ok(cmd_buffer) => Some(cmd_buffer),
+                    Err(_) => {
+                        println!("Failed to update cmd buffer");
+                        None
                     }
-                } else {
-                    None
                 }
             })
             .collect::<Vec<_>>();
@@ -255,7 +258,7 @@ impl App {
     unsafe fn update_secondary_command_buffer(
         &mut self,
         image_index: usize,
-        id: &ChunkId,
+        id: &MeshId,
         index_count: usize,
     ) -> Result<vk::CommandBuffer> {
         // println!("{LOG_VK} ImageIndex({image_index}) Updating sec buffer");
@@ -269,10 +272,10 @@ impl App {
 
             let command_buffer = self.device.allocate_command_buffers(&allocate_info)?[0];
 
-            command_buffers.insert(id.clone(), command_buffer);
+            command_buffers.insert(*id, command_buffer);
         }
 
-        let command_buffer = *command_buffers
+        let cmd_buffer = *command_buffers
             .get(id)
             .context("Cannot use command buffer")?;
         let vertex_buffer = *self
@@ -281,10 +284,18 @@ impl App {
             .get(id)
             .context("Cannot use vertex buffer")?;
 
-        let start = WorldPosition::from(id);
+        let start = WorldPosition::from(id.chunk_id());
         let x = start.x as f32;
         let y = start.y as f32;
-        let z = start.z as f32;
+        let mut z = start.z as f32;
+
+        if id.is_water() {
+            z -= 2.0 / 12.0;
+        }
+
+        // let x = start.x as f32 * 1.05;
+        // let y = start.y as f32 * 1.05;
+        // let z = start.z as f32 * 1.05;
 
         let model = glm::translate(&glm::identity(), &glm::vec3(x, y, z));
         let (_, model_bytes, _) = model.as_slice().align_to::<u8>();
@@ -301,23 +312,23 @@ impl App {
             .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE)
             .inheritance_info(&inheritance_info);
 
-        self.device.begin_command_buffer(command_buffer, &info)?;
+        self.device.begin_command_buffer(cmd_buffer, &info)?;
 
         self.device.cmd_bind_pipeline(
-            command_buffer,
+            cmd_buffer,
             vk::PipelineBindPoint::GRAPHICS,
             self.data.pipeline,
         );
         self.device
-            .cmd_bind_vertex_buffers(command_buffer, 0, &[vertex_buffer], &[0]);
+            .cmd_bind_vertex_buffers(cmd_buffer, 0, &[vertex_buffer], &[0]);
         self.device.cmd_bind_index_buffer(
-            command_buffer,
+            cmd_buffer,
             self.data.chunk_index_buffer[id],
             0,
             vk::IndexType::UINT32,
         );
         self.device.cmd_bind_descriptor_sets(
-            command_buffer,
+            cmd_buffer,
             vk::PipelineBindPoint::GRAPHICS,
             self.data.pipeline_layout,
             0,
@@ -325,25 +336,25 @@ impl App {
             &[],
         );
         self.device.cmd_push_constants(
-            command_buffer,
+            cmd_buffer,
             self.data.pipeline_layout,
             vk::ShaderStageFlags::VERTEX,
             0,
             model_bytes,
         );
         self.device.cmd_push_constants(
-            command_buffer,
+            cmd_buffer,
             self.data.pipeline_layout,
             vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
             64,
             &time_bytes,
         );
         self.device
-            .cmd_draw_indexed(command_buffer, index_count as u32, 1, 0, 0, 0);
+            .cmd_draw_indexed(cmd_buffer, index_count as u32, 1, 0, 0, 0);
 
-        self.device.end_command_buffer(command_buffer)?;
+        self.device.end_command_buffer(cmd_buffer)?;
 
-        Ok(command_buffer)
+        Ok(cmd_buffer)
     }
 
     unsafe fn update_uniform_buffer(
@@ -477,18 +488,18 @@ impl App {
         self.data.chunk_vertex_buffers_memory.clear();
     }
 
-    pub unsafe fn unload_single_chunk(&mut self, id: &ChunkId) {
-        if let Some(buffer) = self.data.chunk_index_buffer.remove(id) {
+    pub unsafe fn unload_single_chunk(&mut self, mesh_id: &MeshId) {
+        if let Some(buffer) = self.data.chunk_index_buffer.remove(mesh_id) {
             self.device.destroy_buffer(buffer, None);
         }
-        if let Some(memory) = self.data.chunk_index_buffer_memory.remove(id) {
+        if let Some(memory) = self.data.chunk_index_buffer_memory.remove(mesh_id) {
             self.device.free_memory(memory, None);
         }
 
-        if let Some(buffer) = self.data.chunk_vertex_buffers.remove(id) {
+        if let Some(buffer) = self.data.chunk_vertex_buffers.remove(mesh_id) {
             self.device.destroy_buffer(buffer, None);
         }
-        if let Some(memory) = self.data.chunk_vertex_buffers_memory.remove(id) {
+        if let Some(memory) = self.data.chunk_vertex_buffers_memory.remove(mesh_id) {
             self.device.free_memory(memory, None);
         }
     }

@@ -3,7 +3,7 @@ extern crate nalgebra_glm as glm;
 pub const TRANSPARENT: [u8; 4] = [0, 0, 0, 0];
 pub const RED: [u8; 4] = [255, 0, 0, 255];
 pub const WHITE: [u8; 4] = [255, 255, 255, 255];
-pub const WATER: [u8; 4] = [10, 98, 225, 128];
+pub const WATER: [u8; 4] = [10, 98, 225, 200];
 pub const STONE: [u8; 4] = [91, 93, 108, 255];
 pub const GRASS: [u8; 4] = [130, 186, 23, 255];
 pub const SAND: [u8; 4] = [195, 194, 155, 255];

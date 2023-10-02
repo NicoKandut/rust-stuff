@@ -1,10 +1,13 @@
 #![feature(test)]
 #![feature(deadline_api)]
 
+// extern crate libc;
 extern crate nalgebra_glm as glm;
+// extern crate rfmod;
 extern crate test;
 
 use crate::{
+    // sound::SoundEngine,
     stats::Stats,
     world_thread::{MeshEvent, Request},
 };
@@ -14,7 +17,7 @@ use geometry::Ray;
 use graphics::camera::FlyingCamera;
 use logging::{log, LOG_ENGINE};
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, VecDeque},
     sync::mpsc,
     time::{Duration, Instant},
 };
@@ -27,11 +30,11 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
 };
-use world::{ChunkData, ChunkId, WorldPosition, CHUNK_SIZE_F};
+use world::{ChunkData, ChunkId, MeshId, WorldPosition, CHUNK_SIZE_F};
 
 mod chunk_stream;
 pub mod models;
-pub mod render;
+// mod sound;
 mod stats;
 pub mod systems;
 mod world_thread;
@@ -39,14 +42,15 @@ mod world_thread;
 #[derive(Clone)]
 struct ChunkUpdate(ChunkId, ChunkData, Instant);
 
-const INITIAL_RENDER_DISTANCE: f32 = CHUNK_SIZE_F * 6.0;
-const INITIAL_UNRENDER_DISTANCE: f32 = CHUNK_SIZE_F * 7.0;
+const INITIAL_LOAD_DISTANCE: f32 = CHUNK_SIZE_F * 5.0;
+const INITIAL_UNLOAD_DISTANCE: f32 = CHUNK_SIZE_F * 6.0;
 const PLAYER_BUILDING_REACH: f32 = 10.0;
 const STAT_INTERVAL: Duration = Duration::from_secs(1);
 
 pub struct Engine {
     camera: FlyingCamera,
-    meshes: HashMap<ChunkId, usize>,
+    meshes: BTreeMap<MeshId, usize>,
+    deletion_queue: VecDeque<MeshId>,
 }
 
 pub struct BlockUpdate {
@@ -59,7 +63,8 @@ impl Engine {
         log!(*LOG_ENGINE, "Creating engine");
         Self {
             camera: FlyingCamera::new(glm::vec3(0., 0., 64.)),
-            meshes: HashMap::new(),
+            meshes: BTreeMap::new(),
+            deletion_queue: Default::default(),
         }
     }
 
@@ -71,8 +76,8 @@ impl Engine {
         let (_world_thread, world_requests, world_events) = world_thread::spawn();
         world_requests
             .send(Request::SetRenderDistance(
-                INITIAL_RENDER_DISTANCE,
-                INITIAL_UNRENDER_DISTANCE,
+                INITIAL_LOAD_DISTANCE,
+                INITIAL_UNLOAD_DISTANCE,
             ))
             .expect("World Thread must be available");
 
@@ -90,6 +95,9 @@ impl Engine {
         log!(*LOG_ENGINE, "Setting up app");
         let mut app = unsafe { App::create(&window)? };
 
+        // log!(*LOG_ENGINE, "Setting up sound");
+        // let sound = SoundEngine::new();
+
         log!(*LOG_ENGINE, "Setting up state");
         // Window state
         let mut destroying = false;
@@ -99,37 +107,73 @@ impl Engine {
         let mut cursor_visible = false;
         // Game state
         let mut godmode = false;
-        let mut render_distance = INITIAL_RENDER_DISTANCE;
-        let mut unrender_distance = INITIAL_UNRENDER_DISTANCE;
+        let mut load_distance = INITIAL_LOAD_DISTANCE;
+        let mut unload_distance = INITIAL_UNLOAD_DISTANCE;
 
         let start = Instant::now();
         let mut stats = Stats::new();
 
         let mut previous_frame_start = start;
+        // let mut previous_frame_end = previous_frame_start;
 
         let mut last_sent_position = glm::vec3(-100000.0, 100000.0, 100000.0);
         let mut last_sent_time = start;
 
+        // let mut dur_between_frames = Duration::default();
+        // let mut dur_cam_update = Duration::default();
+        // let mut dur_world_send = Duration::default();
+        // let mut dur_delete = Duration::default();
+        // let mut dur_receive = Duration::default();
+        // let mut dur_render = Duration::default();
+
         event_loop.run(move |event, _, control_flow| match event {
             Event::MainEventsCleared if !destroying && !minimized => {
+                window.request_redraw();
+            }
+            Event::RedrawRequested(_) => {
+                // Start frame
                 let current_frame_start = Instant::now();
                 let delta_time = &current_frame_start
                     .duration_since(previous_frame_start)
                     .as_secs_f32();
+                // dur_between_frames += current_frame_start.duration_since(previous_frame_end);
 
+                // Do logic
+                // let now: Instant = Instant::now();
                 self.update_camera(delta_time, godmode);
+                // dur_cam_update += now.elapsed();
+
+                // let now: Instant = Instant::now();
                 self.send_world_thread_move_request(
                     &world_requests,
                     &mut last_sent_time,
                     &mut last_sent_position,
                 );
+                // dur_world_send += now.elapsed();
+
+                // let now: Instant = Instant::now();
+                self.drain_deletion_queue(&mut app);
+                // dur_delete += now.elapsed();
+
+                // let now: Instant = Instant::now();
                 self.receive_mesh_events(&world_events, &mut app, &current_frame_start);
+                // dur_receive += now.elapsed();
 
+                // render
+                // let now: Instant = Instant::now();
                 unsafe { app.render(&window, &self.meshes, &self.camera) }.unwrap();
+                // dur_render += now.elapsed();
 
+                // End frame
+                //previous_frame_end = Instant::now();
                 stats.add_frame();
                 stats.log_interval(&STAT_INTERVAL);
-
+                // println!("Frame time disection:\n  between: {:?}\n  cam: {:?}\n  send: {:?}\n  delete: {:?}\n  receive: {:?}\n  render: {:?}", dur_between_frames,
+                // dur_cam_update,
+                // dur_world_send,
+                // dur_delete,
+                // dur_receive,
+                // dur_render);
                 previous_frame_start = current_frame_start;
             }
             Event::WindowEvent { event, .. } => match event {
@@ -147,9 +191,7 @@ impl Engine {
                     world_requests
                         .send(world_thread::Request::Exit)
                         .expect("World Thread must be available");
-                    unsafe {
-                        app.destroy();
-                    }
+                    unsafe { app.destroy() };
                 }
                 WindowEvent::MouseInput { state, button, .. } if focused => {
                     let ray = Ray::new(
@@ -233,22 +275,22 @@ impl Engine {
                                 godmode = !godmode;
                             }
                             Some(VirtualKeyCode::Up) => {
-                                render_distance += CHUNK_SIZE_F;
-                                unrender_distance += CHUNK_SIZE_F;
+                                load_distance += CHUNK_SIZE_F;
+                                unload_distance += CHUNK_SIZE_F;
                                 world_requests
                                     .send(Request::SetRenderDistance(
-                                        render_distance,
-                                        unrender_distance,
+                                        load_distance,
+                                        unload_distance,
                                     ))
                                     .expect("World Thread must be available");
                             }
                             Some(VirtualKeyCode::Down) => {
-                                render_distance -= CHUNK_SIZE_F;
-                                unrender_distance -= CHUNK_SIZE_F;
+                                load_distance -= CHUNK_SIZE_F;
+                                unload_distance -= CHUNK_SIZE_F;
                                 world_requests
                                     .send(Request::SetRenderDistance(
-                                        render_distance,
-                                        unrender_distance,
+                                        load_distance,
+                                        unload_distance,
                                     ))
                                     .expect("World Thread must be available");
                             }
@@ -266,8 +308,12 @@ impl Engine {
             },
             _ => {}
         })
+    }
 
-        // world_thread.join().expect("World thread should not panic");
+    fn drain_deletion_queue(&mut self, app: &mut App) {
+        while let Some(mesh_id) = self.deletion_queue.pop_front() {
+            unsafe { app.unload_single_chunk(&mesh_id) };
+        }
     }
 
     fn receive_mesh_events(
@@ -276,20 +322,45 @@ impl Engine {
         app: &mut App,
         current_frame_start: &Instant,
     ) {
-        const ALLOWED_FRAME_TIME: Duration = Duration::from_millis(10);
+        const ALLOWED_FRAME_TIME: Duration = Duration::from_millis(1);
 
         while let Ok(mesh_event) = world_events.try_recv() {
             match mesh_event {
-                MeshEvent::Add(id, mesh) => {
-                    unsafe {
-                        self.meshes.insert(id, mesh.indices.len());
-                        create_chunk_buffers(&app.instance, &app.device, &id, &mesh, &mut app.data)
-                            .unwrap();
-                    };
+                MeshEvent::Add(id, (opaque_mesh, transparent_mesh)) => {
+                    if let Some(mesh) = opaque_mesh {
+                        let mesh_id = MeshId::Opaque(id);
+                        self.meshes.insert(mesh_id, mesh.indices.len());
+                        unsafe {
+                            create_chunk_buffers(
+                                &app.instance,
+                                &app.device,
+                                mesh_id,
+                                mesh,
+                                &mut app.data,
+                            )
+                            .expect("Opaque chunk buffers must be created.");
+                        };
+                    }
+                    if let Some(mesh) = transparent_mesh {
+                        let mesh_id = MeshId::Transparent(id);
+                        self.meshes.insert(mesh_id, mesh.indices.len());
+                        unsafe {
+                            create_chunk_buffers(
+                                &app.instance,
+                                &app.device,
+                                mesh_id,
+                                mesh,
+                                &mut app.data,
+                            )
+                            .expect("Opaque chunk buffers must be created.");
+                        };
+                    }
                 }
                 MeshEvent::Remove(id) => {
-                    self.meshes.remove(&id);
-                    unsafe { app.unload_single_chunk(&id) } // TODO: do this in deletion queue
+                    let mesh_ids = [MeshId::Opaque(id), MeshId::Transparent(id)];
+                    self.deletion_queue.extend(mesh_ids);
+                    self.meshes.remove(&mesh_ids[0]);
+                    self.meshes.remove(&mesh_ids[1]);
                 }
             }
             if current_frame_start.elapsed() > ALLOWED_FRAME_TIME {

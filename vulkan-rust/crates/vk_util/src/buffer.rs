@@ -7,7 +7,7 @@ use anyhow::Result;
 use graphics::{Mesh, Vertex};
 use std::{mem::size_of, ptr::copy_nonoverlapping as memcpy};
 use vulkanalia::prelude::v1_0::*;
-use world::ChunkId;
+use world::MeshId;
 
 pub unsafe fn create_vertex_buffer(
     instance: &Instance,
@@ -53,19 +53,19 @@ pub unsafe fn create_vertex_buffer(
 pub unsafe fn create_chunk_buffers(
     instance: &Instance,
     device: &Device,
-    id: &ChunkId,
-    mesh: &Mesh,
+    id: MeshId,
+    mesh: Mesh,
     data: &mut AppData,
 ) -> Result<()> {
-    // println!("{LOG_VK} Creating chunk buffers");
     create_chunk_vertex_buffer(instance, device, id, &mesh.vertices, data)?;
-    create_chunk_index_buffer(instance, device, data, id, &mesh.indices)
+    create_chunk_index_buffer(instance, device, data, id, &mesh.indices)?;
+    Ok(())
 }
 
 pub unsafe fn create_chunk_vertex_buffer(
     instance: &Instance,
     device: &Device,
-    id: &ChunkId,
+    id: MeshId,
     vertices: &Vec<Vertex>,
     data: &mut AppData,
 ) -> Result<()> {
@@ -96,7 +96,7 @@ pub unsafe fn create_chunk_vertex_buffer(
     )?;
 
     // TODO: not great causes stutter
-    // device.device_wait_idle().unwrap();
+    device.device_wait_idle().unwrap();
 
     let prev_buffer = data.chunk_vertex_buffers.insert(id.clone(), vertex_buffer);
     if let Some(b) = prev_buffer {
@@ -217,7 +217,7 @@ pub unsafe fn create_chunk_index_buffer(
     instance: &Instance,
     device: &Device,
     data: &mut AppData,
-    id: &ChunkId,
+    id: MeshId,
     indices: &Vec<u32>,
 ) -> Result<()> {
     let size = (size_of::<u32>() * indices.len()) as u64;
@@ -247,21 +247,21 @@ pub unsafe fn create_chunk_index_buffer(
     )?;
 
     // TODO: not great causes stutter
-    // device.device_wait_idle().unwrap();
+    device.device_wait_idle().unwrap();
 
-    let prev_buffer = data.chunk_index_buffer.insert(id.clone(), index_buffer);
-    // if let Some(b) = prev_buffer {
-    //     // TODO: is destroying correct? Yes but do it at a later poit with a queue
-    //     device.destroy_buffer(b, None);
-    // }
+    let prev_buffer = data.chunk_index_buffer.insert(id, index_buffer);
+    if let Some(b) = prev_buffer {
+        // TODO: is destroying correct? Yes but do it at a later poit with a queue
+        device.destroy_buffer(b, None);
+    }
 
     let prev_memory = data
         .chunk_index_buffer_memory
         .insert(id.clone(), index_buffer_memory);
-    // if let Some(m) = prev_memory {
-    //     // TODO: is freeing correct?
-    //     device.free_memory(m, None);
-    // }
+    if let Some(m) = prev_memory {
+        // TODO: is freeing correct?
+        device.free_memory(m, None);
+    }
 
     copy_buffer(device, data, staging_buffer, index_buffer, size)?;
 

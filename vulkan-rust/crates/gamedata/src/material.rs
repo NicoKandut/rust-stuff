@@ -14,7 +14,7 @@ pub enum Material {
     #[default]
     Unset  =                  0,
     Air    =                  1,
-    Water  =         OPAQUE | 2,
+    Water  =                  2,
     Glass  = SOLID |          3,
     Stone  = SOLID | OPAQUE | 4,
     Grass  = SOLID | OPAQUE | 5,
@@ -36,6 +36,11 @@ impl Material {
     #[inline]
     pub fn is_surface(&self) -> bool {
         *self == Material::Grass || *self == Material::Sand
+    }
+
+    #[inline]
+    pub fn is_invisible(&self) -> bool {
+        *self == Material::Unset || *self == Material::Air
     }
 
     #[inline]
