@@ -10,4 +10,4 @@ cargo run -p game
 
 ### 03.10.2023
 
-![Preview](https://raw.githubusercontent.com/NicoKandut/rust-stuff/master/vulkan-rust/.github/images/Screenshot 2023-10-03 174553.png)
+![Preview](https://raw.githubusercontent.com/NicoKandut/rust-stuff/master/vulkan-rust/.github/images/Screenshot_2023-10-03 174553.png)
