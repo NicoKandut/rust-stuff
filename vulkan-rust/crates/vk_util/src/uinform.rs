@@ -44,7 +44,7 @@ pub unsafe fn create_uniform_buffers(
         let (uniform_buffer, uniform_buffer_memory) = create_buffer(
             instance,
             device,
-            data,
+            &data.physical_device,
             size_of::<UniformBufferObject>() as u64,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
             vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,

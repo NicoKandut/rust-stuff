@@ -1,4 +1,4 @@
-use crate::{appdata::AppData, device::sustainabilityerror::SuitabilityError};
+use crate::device::sustainabilityerror::SuitabilityError;
 use anyhow::{anyhow, Result};
 use vulkanalia::{prelude::v1_0::*, vk::KhrSurfaceExtension};
 
@@ -11,7 +11,7 @@ pub struct QueueFamilyIndices {
 impl QueueFamilyIndices {
     pub unsafe fn get(
         instance: &Instance,
-        data: &AppData,
+        surface: vk::SurfaceKHR,
         physical_device: vk::PhysicalDevice,
     ) -> Result<Self> {
         let properties = instance.get_physical_device_queue_family_properties(physical_device);
@@ -29,7 +29,7 @@ impl QueueFamilyIndices {
             if instance.get_physical_device_surface_support_khr(
                 physical_device,
                 index as u32,
-                data.surface,
+                surface,
             )? {
                 present = Some(index as u32);
                 break;

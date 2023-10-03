@@ -56,8 +56,8 @@ pub unsafe fn create_swapchain(
     device: &Device,
     data: &mut AppData,
 ) -> Result<()> {
-    let indices = QueueFamilyIndices::get(instance, data, data.physical_device)?;
-    let support = SwapchainSupport::get(instance, data, data.physical_device)?;
+    let indices = QueueFamilyIndices::get(instance, data.surface, data.physical_device)?;
+    let support = SwapchainSupport::get(instance, data.surface, data.physical_device)?;
 
     let surface_format = get_swapchain_surface_format(&support.formats);
     let present_mode = get_swapchain_present_mode(&support.present_modes);

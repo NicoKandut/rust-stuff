@@ -22,7 +22,7 @@ pub unsafe fn create_vertex_buffer(
     let (staging_buffer, staging_buffer_memory) = create_buffer(
         instance,
         device,
-        data,
+        &data.physical_device,
         size,
         vk::BufferUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
@@ -37,7 +37,7 @@ pub unsafe fn create_vertex_buffer(
     let (vertex_buffer, vertex_buffer_memory) = create_buffer(
         instance,
         device,
-        data,
+        &data.physical_device,
         size,
         vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
@@ -77,7 +77,7 @@ pub unsafe fn create_chunk_vertex_buffer(
     let (staging_buffer, staging_buffer_memory) = create_buffer(
         instance,
         device,
-        data,
+        &data.physical_device,
         size,
         vk::BufferUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
@@ -92,7 +92,7 @@ pub unsafe fn create_chunk_vertex_buffer(
     let (vertex_buffer, vertex_buffer_memory) = create_buffer(
         instance,
         device,
-        data,
+        &data.physical_device,
         size,
         vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
@@ -125,7 +125,7 @@ pub unsafe fn create_chunk_vertex_buffer(
 pub unsafe fn create_buffer(
     instance: &Instance,
     device: &Device,
-    data: &AppData,
+    physical_device: &vk::PhysicalDevice,
     size: vk::DeviceSize,
     usage: vk::BufferUsageFlags,
     properties: vk::MemoryPropertyFlags,
@@ -144,7 +144,7 @@ pub unsafe fn create_buffer(
         .allocation_size(requirements.size)
         .memory_type_index(get_memory_type_index(
             instance,
-            &data.physical_device,
+            &physical_device,
             properties,
             requirements,
         )?);
@@ -184,7 +184,7 @@ pub unsafe fn create_index_buffer(
     let (staging_buffer, staging_buffer_memory) = create_buffer(
         instance,
         device,
-        data,
+        &data.physical_device,
         size,
         vk::BufferUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
@@ -199,7 +199,7 @@ pub unsafe fn create_index_buffer(
     let (index_buffer, index_buffer_memory) = create_buffer(
         instance,
         device,
-        data,
+        &data.physical_device,
         size,
         vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
@@ -228,7 +228,7 @@ pub unsafe fn create_chunk_index_buffer(
     let (staging_buffer, staging_buffer_memory) = create_buffer(
         instance,
         device,
-        data,
+        &data.physical_device,
         size,
         vk::BufferUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
@@ -243,7 +243,7 @@ pub unsafe fn create_chunk_index_buffer(
     let (index_buffer, index_buffer_memory) = create_buffer(
         instance,
         device,
-        data,
+        &data.physical_device,
         size,
         vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
@@ -294,11 +294,11 @@ pub fn prepare_mesh(
     instance: &Instance,
     device: &Device,
     mesh: &Mesh,
-    data: &mut AppData,
+    physical_device: &vk::PhysicalDevice,
 ) -> PreparedMesh {
     PreparedMesh {
-        vertex: prepare_vertex_buffer(instance, device, &mesh.vertices, data),
-        index: prepare_index_buffer(instance, device, &mesh.indices, data),
+        vertex: prepare_vertex_buffer(instance, device, &mesh.vertices, physical_device),
+        index: prepare_index_buffer(instance, device, &mesh.indices, physical_device),
     }
 }
 
@@ -306,14 +306,14 @@ pub fn prepare_vertex_buffer(
     instance: &Instance,
     device: &Device,
     items: &[Vertex],
-    data: &mut AppData,
+    physical_device: &vk::PhysicalDevice,
 ) -> PreparedBuffer {
     unsafe {
         prepare_buffer(
             instance,
             device,
             items,
-            data,
+            physical_device,
             vk::BufferUsageFlags::VERTEX_BUFFER,
         )
         .expect("failed to prepare vertex buffer")
@@ -324,14 +324,14 @@ pub fn prepare_index_buffer(
     instance: &Instance,
     device: &Device,
     items: &[u32],
-    data: &mut AppData,
+    physical_device: &vk::PhysicalDevice,
 ) -> PreparedBuffer {
     unsafe {
         prepare_buffer(
             instance,
             device,
             items,
-            data,
+            physical_device,
             vk::BufferUsageFlags::INDEX_BUFFER,
         )
         .expect("failed to prepare index buffer")
@@ -342,7 +342,7 @@ pub unsafe fn prepare_buffer<T>(
     instance: &Instance,
     device: &Device,
     items: &[T],
-    data: &mut AppData,
+    physical_device: &vk::PhysicalDevice,
     usage: vk::BufferUsageFlags,
 ) -> Result<PreparedBuffer> {
     let item_count = items.len();
@@ -351,7 +351,7 @@ pub unsafe fn prepare_buffer<T>(
     let (staging_buffer, staging_buffer_memory) = create_buffer(
         instance,
         device,
-        data,
+        physical_device,
         buffer_size,
         vk::BufferUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_VISIBLE,
@@ -371,7 +371,7 @@ pub unsafe fn prepare_buffer<T>(
     let (target_buffer, target_buffer_memory) = create_buffer(
         instance,
         device,
-        data,
+        physical_device,
         buffer_size,
         vk::BufferUsageFlags::TRANSFER_DST | usage,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,

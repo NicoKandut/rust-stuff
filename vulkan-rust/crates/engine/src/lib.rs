@@ -14,19 +14,19 @@ use crate::{
 use anyhow::Result;
 use gamedata::material::Material;
 use geometry::Ray;
-use graphics::camera::FlyingCamera;
+use graphics::{camera::FlyingCamera, Mesh};
 use logging::{log, LOG_ENGINE};
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::mpsc,
+    thread,
     time::{Duration, Instant},
 };
 use vk_util::{
-    app::App,
-    buffer::{
-        create_chunk_buffers, prepare_buffer, prepare_mesh, prepare_vertex_buffer, PreparedMesh,
-    },
+    app::{App, Delete},
+    buffer::{prepare_mesh, PreparedMesh},
 };
+use vulkanalia::vk::DeviceV1_0;
 use winit::{
     dpi::{LogicalSize, PhysicalPosition},
     event::{
@@ -47,15 +47,15 @@ mod world_thread;
 #[derive(Clone)]
 struct ChunkUpdate(ChunkId, ChunkData, Instant);
 
-const INITIAL_LOAD_DISTANCE: f32 = CHUNK_SIZE_F * 1.0;
-const INITIAL_UNLOAD_DISTANCE: f32 = CHUNK_SIZE_F * 2.0;
+const INITIAL_LOAD_DISTANCE: f32 = CHUNK_SIZE_F * 5.0;
+const INITIAL_UNLOAD_DISTANCE: f32 = CHUNK_SIZE_F * 6.0;
 const PLAYER_BUILDING_REACH: f32 = 10.0;
 const STAT_INTERVAL: Duration = Duration::from_secs(1);
 
 pub struct Engine {
     camera: FlyingCamera,
     meshes: BTreeMap<MeshId, usize>,
-    deletion_queue: VecDeque<MeshId>,
+    deletion_queue: VecDeque<Delete>,
 }
 
 pub struct BlockUpdate {
@@ -124,6 +124,17 @@ impl Engine {
         let mut last_sent_position = glm::vec3(-100000.0, 100000.0, 100000.0);
         let mut last_sent_time = start;
 
+        let (prepare_meshes_tx, prepare_meshes_rx) = mpsc::channel();
+        let (ready_meshes_tx, ready_meshes_rx) = mpsc::channel();
+        let instance = app.instance.clone();
+        let device = app.device.clone();
+        let physical_device = app.data.physical_device.clone();
+        let _handle = thread::spawn(move || {
+            while let Ok((mesh_id, mesh)) = prepare_meshes_rx.recv() {
+                let prepared_mesh = prepare_mesh(&instance, &device, &mesh, &physical_device);
+                ready_meshes_tx.send((mesh_id, prepared_mesh)).unwrap();
+            }
+        });
         // TODO: can be local variable
         let mut prepared_meshes = Vec::new();
 
@@ -160,6 +171,7 @@ impl Engine {
                 // dur_world_send += now.elapsed();
 
                 // let now: Instant = Instant::now();
+                unsafe { app.device.device_wait_idle().unwrap() };
                 self.drain_deletion_queue(&mut app);
                 // dur_delete += now.elapsed();
 
@@ -168,9 +180,17 @@ impl Engine {
                     &world_events,
                     &mut app,
                     &current_frame_start,
-                    &mut prepared_meshes,
+                    prepare_meshes_tx.clone(),
                 );
                 // dur_receive += now.elapsed();
+
+                for _ in 0..10 {
+                    if let Ok(mesh) = ready_meshes_rx.try_recv() {
+                        prepared_meshes.push(mesh);
+                    } else {
+                        break;
+                    }
+                }
 
                 // render
                 // let now: Instant = Instant::now();
@@ -180,6 +200,7 @@ impl Engine {
                         &mut self.meshes,
                         &self.camera,
                         &mut prepared_meshes,
+                        &mut self.deletion_queue,
                     )
                 }
                 .unwrap();
@@ -332,8 +353,19 @@ impl Engine {
     }
 
     fn drain_deletion_queue(&mut self, app: &mut App) {
-        while let Some(mesh_id) = self.deletion_queue.pop_front() {
-            unsafe { app.unload_single_chunk(&mesh_id) };
+        let mut count = 0;
+        while let Some(delete) = self.deletion_queue.pop_front() {
+            match delete {
+                Delete::Mesh(mesh_id) => unsafe { app.unload_single_chunk(&mesh_id) },
+                // Delete::Buffer(buffer) => unsafe { app.device.destroy_buffer(buffer, None) },
+                // Delete::DeviceMemory(memory) => unsafe { app.device.free_memory(memory, None) },
+                _ => {}
+            }
+            count += 1;
+
+            if count > 10 {
+                break;
+            }
         }
     }
 
@@ -342,7 +374,7 @@ impl Engine {
         world_events: &mpsc::Receiver<MeshEvent>,
         app: &mut App,
         current_frame_start: &Instant,
-        prepared_meshes: &mut Vec<(MeshId, PreparedMesh)>,
+        prepare_meshes_tx: mpsc::Sender<(MeshId, Mesh)>,
     ) {
         const ALLOWED_FRAME_TIME: Duration = Duration::from_millis(1);
 
@@ -350,22 +382,20 @@ impl Engine {
             match mesh_event {
                 MeshEvent::Add(id, (opaque_mesh, transparent_mesh)) => {
                     if let Some(mesh) = opaque_mesh {
-                        let prepared_mesh =
-                            prepare_mesh(&app.instance, &app.device, &mesh, &mut app.data);
-                        prepared_meshes.push((MeshId::Opaque(id), prepared_mesh));
-
+                        prepare_meshes_tx.send((MeshId::Opaque(id), mesh)).unwrap();
                         // self.meshes.insert(mesh_id, mesh.indices.len()); // TODO: move to later
                     }
                     if let Some(mesh) = transparent_mesh {
-                        let prepared_mesh =
-                            prepare_mesh(&app.instance, &app.device, &mesh, &mut app.data);
-                        prepared_meshes.push((MeshId::Transparent(id), prepared_mesh));
+                        prepare_meshes_tx
+                            .send((MeshId::Transparent(id), mesh))
+                            .unwrap();
                         // self.meshes.insert(mesh_id, mesh.indices.len()); // TODO: move to later
                     }
                 }
                 MeshEvent::Remove(id) => {
                     let mesh_ids = [MeshId::Opaque(id), MeshId::Transparent(id)];
-                    self.deletion_queue.extend(mesh_ids);
+                    self.deletion_queue
+                        .extend(mesh_ids.map(|id| Delete::Mesh(id)));
                     self.meshes.remove(&mesh_ids[0]);
                     self.meshes.remove(&mesh_ids[1]);
                 }

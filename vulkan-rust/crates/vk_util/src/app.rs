@@ -6,7 +6,7 @@ use crate::{
     buffer::PreparedMesh,
     command::{create_command_buffers, create_command_pools},
     constants::{MAX_FRAMES_IN_FLIGHT, VALIDATION_ENABLED},
-    device::pick_device,
+    device::{physical, pick_device},
     image::{
         create_depth_objects, create_texture_image, create_texture_image_view,
         create_texture_sampler,
@@ -17,12 +17,13 @@ use crate::{
     swapchain::{create_swapchain, create_swapchain_image_views},
     uinform::{create_descriptor_set_layout, create_uniform_buffers, UniformBufferObject},
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use geometry::AABB;
 use graphics::{camera::FlyingCamera, Frustum};
+use logging::{log, LOG_VULKAN};
 use resources::prelude::CACHE;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, VecDeque},
     mem::size_of,
     ptr::copy_nonoverlapping as memcpy,
     time::Instant,
@@ -37,6 +38,12 @@ use vulkanalia::{
 };
 use winit::window::Window;
 use world::{MeshId, WorldPosition};
+
+pub enum Delete {
+    Mesh(MeshId),
+    Buffer(vk::Buffer),
+    DeviceMemory(vk::DeviceMemory),
+}
 
 #[derive(Clone, Debug)]
 pub struct App {
@@ -53,45 +60,51 @@ pub struct App {
 impl App {
     /// Creates our Vulkan app.
     pub unsafe fn create(window: &Window) -> Result<Self> {
+        log!(*LOG_VULKAN, "Initializing vulkan");
         let start = Instant::now();
         let loader = LibloadingLoader::new(LIBRARY)?;
         let entry = Entry::new(loader).map_err(|b| anyhow!("{}", b))?;
         let mut data = AppData::default();
+
+        log!(*LOG_VULKAN, "Creating instance");
         let instance = create_instance(window, &entry, &mut data)?;
         data.surface = vk_window::create_surface(&instance, window)?;
-        let device = pick_device(&instance, &mut data)?;
+        let (logical_device, physical_device) = pick_device(&instance, data.surface)?;
+        data.physical_device = physical_device;
+        data.graphics_queue = logical_device.graphics_queue;
+        data.present_queue = logical_device.present_queue;
 
-        create_swapchain(window, &instance, &device, &mut data)?;
-        create_swapchain_image_views(&device, &mut data)?;
-        create_render_pass(&instance, &device, &mut data)?;
-        create_descriptor_set_layout(&device, &mut data)?;
-        create_pipeline(&device, &mut data)?;
-        create_command_pools(&instance, &device, &mut data)?;
-        create_depth_objects(&instance, &device, &mut data)?;
-        create_framebuffers(&device, &mut data)?;
+        create_swapchain(window, &instance, &logical_device.device, &mut data)?;
+        create_swapchain_image_views(&logical_device.device, &mut data)?;
+        create_render_pass(&instance, &logical_device.device, &mut data)?;
+        create_descriptor_set_layout(&logical_device.device, &mut data)?;
+        create_pipeline(&logical_device.device, &mut data)?;
+        create_command_pools(&instance, &logical_device.device, &mut data)?;
+        create_depth_objects(&instance, &logical_device.device, &mut data)?;
+        create_framebuffers(&logical_device.device, &mut data)?;
         create_texture_image(
             &instance,
-            &device,
+            &logical_device.device,
             &mut data,
             CACHE.get_img("\\assets\\palette.png"),
         )?;
-        create_texture_image_view(&device, &mut data)?;
-        create_texture_sampler(&device, &mut data)?;
+        create_texture_image_view(&logical_device.device, &mut data)?;
+        create_texture_sampler(&logical_device.device, &mut data)?;
         // load_model(&mut data)?;
         // load_world(&mut data, voxels)?;
         // create_vertex_buffer(&instance, &device, &mut data)?;
         // create_index_buffer(&instance, &device, &mut data)?;
-        create_uniform_buffers(&instance, &device, &mut data)?;
-        create_descriptor_pool(&device, &mut data)?;
-        create_descriptor_sets(&device, &mut data)?;
-        create_command_buffers(&device, &mut data)?;
-        create_sync_objects(&device, &mut data)?;
+        create_uniform_buffers(&instance, &logical_device.device, &mut data)?;
+        create_descriptor_pool(&logical_device.device, &mut data)?;
+        create_descriptor_sets(&logical_device.device, &mut data)?;
+        create_command_buffers(&logical_device.device, &mut data)?;
+        create_sync_objects(&logical_device.device, &mut data)?;
 
         Ok(Self {
             entry,
             instance,
             data,
-            device,
+            device: logical_device.device,
             frame: 0,
             resized: false,
             start,
@@ -106,6 +119,7 @@ impl App {
         meshes: &mut BTreeMap<MeshId, usize>,
         cam: &FlyingCamera,
         prepared_meshes: &mut Vec<(MeshId, PreparedMesh)>,
+        deletion_queue: &mut VecDeque<Delete>,
     ) -> Result<()> {
         let in_flight_fence = self.data.in_flight_fences[self.frame];
 
@@ -137,7 +151,7 @@ impl App {
 
         let vp = self.calculate_vp(cam);
 
-        self.update_command_buffer(image_index, meshes, &vp, prepared_meshes)?;
+        self.update_command_buffer(image_index, meshes, &vp, prepared_meshes, deletion_queue)?;
         self.update_uniform_buffer(image_index, vp, glm::vec3_to_vec4(&cam.cam.position))?;
 
         let wait_semaphores = &[self.data.image_available_semaphores[self.frame]];
@@ -187,6 +201,7 @@ impl App {
         meshes: &mut BTreeMap<MeshId, usize>,
         vp: &(glm::Mat4, glm::Mat4),
         prepared_meshes: &mut Vec<(MeshId, PreparedMesh)>,
+        deletion_queue: &mut VecDeque<Delete>,
     ) -> Result<()> {
         // println!("{LOG_VK} UPDATING ALL CMD BUFFERS");
         let command_pool = self.data.command_pools[image_index];
@@ -198,10 +213,9 @@ impl App {
         let info = vk::CommandBufferBeginInfo::builder();
         self.device.begin_command_buffer(command_buffer, &info)?;
         let new_meshes = prepared_meshes
-            .drain(..)
+            .drain(0..prepared_meshes.len().min(2))
             .map(|(mesh_id, prepared_mesh)| {
                 let regions = vk::BufferCopy::builder().size(prepared_mesh.vertex.size);
-                println!("Adding copy commands for mesh");
                 self.device.cmd_copy_buffer(
                     command_buffer,
                     prepared_mesh.vertex.staging.buffer,
@@ -282,12 +296,8 @@ impl App {
         self.device.cmd_end_render_pass(command_buffer);
         self.device.end_command_buffer(command_buffer)?;
 
-        if !new_meshes.is_empty() {
-            println!("{} new meshes", new_meshes.len());
-        }
-
         for (mesh_id, prepared_mesh) in new_meshes {
-            self.register_mesh_ready(mesh_id, &prepared_mesh);
+            self.register_mesh_ready(mesh_id, &prepared_mesh, deletion_queue);
             meshes.insert(
                 mesh_id,
                 prepared_mesh.index.size as usize / size_of::<u32>(),
@@ -299,22 +309,25 @@ impl App {
         Ok(())
     }
 
-    fn register_mesh_ready(&mut self, mesh_id: MeshId, prepared_mesh: &PreparedMesh) {
+    fn register_mesh_ready(
+        &mut self,
+        mesh_id: MeshId,
+        prepared_mesh: &PreparedMesh,
+        deletion_queue: &mut VecDeque<Delete>,
+    ) {
         let prev_buffer = self
             .data
             .chunk_vertex_buffers
             .insert(mesh_id, prepared_mesh.vertex.target.buffer);
         if let Some(b) = prev_buffer {
-            // TODO: is destroying correct?
-            // unsafe { self.device.destroy_buffer(b, None) };
+            deletion_queue.push_back(Delete::Buffer(b))
         }
         let prev_memory = self
             .data
             .chunk_vertex_buffers_memory
             .insert(mesh_id, prepared_mesh.vertex.target.memory);
         if let Some(m) = prev_memory {
-            // TODO: is freeing correct?
-            // unsafe { self.device.free_memory(m, None) };
+            deletion_queue.push_back(Delete::DeviceMemory(m))
         }
 
         let prev_buffer = self
@@ -322,16 +335,14 @@ impl App {
             .chunk_index_buffer
             .insert(mesh_id, prepared_mesh.index.target.buffer);
         if let Some(b) = prev_buffer {
-            // TODO: is destroying correct?
-            // unsafe { self.device.destroy_buffer(b, None) };
+            deletion_queue.push_back(Delete::Buffer(b))
         }
         let prev_memory = self
             .data
             .chunk_vertex_buffers_memory
             .insert(mesh_id, prepared_mesh.index.target.memory);
         if let Some(m) = prev_memory {
-            // TODO: is freeing correct?
-            // unsafe { self.device.free_memory(m, None) };
+            deletion_queue.push_back(Delete::DeviceMemory(m))
         }
     }
 

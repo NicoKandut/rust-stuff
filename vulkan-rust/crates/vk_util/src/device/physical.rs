@@ -1,40 +1,31 @@
 use super::{queuefamilies::QueueFamilyIndices, swapchainsupport::SwapchainSupport};
-use crate::{
-    appdata::AppData, constants::DEVICE_EXTENSIONS, device::sustainabilityerror::SuitabilityError,
-};
+use crate::{constants::DEVICE_EXTENSIONS, device::sustainabilityerror::SuitabilityError};
 use anyhow::{anyhow, Result};
-use log::{info, warn};
 use std::collections::HashSet;
 use vulkanalia::prelude::v1_0::*;
 
-pub unsafe fn pick_physical_device(instance: &Instance, data: &mut AppData) -> Result<()> {
-    for physical_device in instance.enumerate_physical_devices()? {
-        let properties = instance.get_physical_device_properties(physical_device);
-
-        if let Err(error) = check_physical_device(instance, data, physical_device) {
-            warn!(
-                "Skipping physical device (`{}`): {}",
-                properties.device_name, error
-            );
-        } else {
-            info!("Selected physical device (`{}`).", properties.device_name);
-            data.physical_device = physical_device;
-            return Ok(());
-        }
-    }
-
-    Err(anyhow!("Failed to find suitable physical device."))
+pub unsafe fn pick_physical_device(
+    instance: &Instance,
+    surface: vk::SurfaceKHR,
+) -> Result<vk::PhysicalDevice> {
+    instance
+        .enumerate_physical_devices()?
+        .into_iter()
+        .find(|physical_device| check_physical_device(instance, surface, *physical_device).is_ok()) // TODO: rank devices and take best
+        .ok_or(anyhow!("Failed to find suitable physical device."))
 }
 
 unsafe fn check_physical_device(
     instance: &Instance,
-    data: &AppData,
+    surface: vk::SurfaceKHR,
     physical_device: vk::PhysicalDevice,
 ) -> Result<()> {
-    QueueFamilyIndices::get(instance, data, physical_device)?;
+    // check if queue families are supported
+    QueueFamilyIndices::get(instance, surface, physical_device)?;
+
     check_physical_device_extensions(instance, physical_device)?;
 
-    let support = SwapchainSupport::get(instance, data, physical_device)?;
+    let support = SwapchainSupport::get(instance, surface, physical_device)?;
     if support.formats.is_empty() || support.present_modes.is_empty() {
         return Err(anyhow!(SuitabilityError("Insufficient swapchain support.")));
     }
